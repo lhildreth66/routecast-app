@@ -534,7 +534,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    maxHeight: '55%',
+    maxHeight: '50%',
     backgroundColor: '#18181b',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
