@@ -91,3 +91,5 @@ __pycache__/
 # Env files
 .env
 # Node lock files (root/backend not used)
+/package-lock.json
+/backend/package-lock.json
