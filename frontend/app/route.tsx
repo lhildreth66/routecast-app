@@ -12,21 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
+import { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 
-// Conditionally import MapView for native platforms
-let MapView: any = null;
-let Polyline: any = null;
-let Marker: any = null;
-
-if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Polyline = Maps.Polyline;
-  Marker = Maps.Marker;
-}
-
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 interface WeatherData {
   temperature: number | null;
@@ -74,8 +63,8 @@ interface RouteData {
 }
 
 // Decode polyline utility
-function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  const points: { latitude: number; longitude: number }[] = [];
+function decodePolyline(encoded: string): [number, number][] {
+  const points: [number, number][] = [];
   let index = 0;
   let lat = 0;
   let lng = 0;
@@ -106,10 +95,7 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
     const dlng = result & 1 ? ~(result >> 1) : result >> 1;
     lng += dlng;
 
-    points.push({
-      latitude: lat / 1e5,
-      longitude: lng / 1e5,
-    });
+    points.push([lat / 1e5, lng / 1e5]);
   }
 
   return points;
@@ -136,16 +122,84 @@ function calculateTotalDistance(waypoints: WaypointWeather[]): number {
 }
 
 function formatDuration(miles: number): string {
-  const hours = Math.floor(miles / 55); // Average 55 mph
+  const hours = Math.floor(miles / 55);
   const minutes = Math.round((miles / 55 - hours) * 60);
   return `${hours}h ${minutes}m`;
+}
+
+// Generate Mapbox Static Image URL
+function getMapboxStaticUrl(routeGeometry: string, waypoints: WaypointWeather[]): string {
+  const accessToken = 'pk.eyJ1IjoibWVkdHJhbjAxIiwiYSI6ImNtanVxZzdubDVmaTYzZXB1OXQycWZocHgifQ.j5RSdKtu-2Mc6Dm0f8HInQ';
+  
+  // Create markers for waypoints
+  const markers = waypoints.map((wp, idx) => {
+    const color = wp.alerts.length > 0 ? 'f44336' : (idx === 0 ? '4CAF50' : idx === waypoints.length - 1 ? 'f44336' : '2196F3');
+    return `pin-s+${color}(${wp.waypoint.lon},${wp.waypoint.lat})`;
+  }).join(',');
+
+  // Encode the polyline for the path
+  const path = `path-4+ef4444-1(${encodeURIComponent(routeGeometry)})`;
+  
+  return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${path},${markers}/auto/600x400@2x?access_token=${accessToken}`;
+}
+
+// Generate HTML for WebView map
+function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[]): string {
+  const routeCoords = decodePolyline(routeGeometry);
+  const center = routeCoords[Math.floor(routeCoords.length / 2)];
+  
+  const markersJs = waypoints.map((wp, idx) => {
+    const color = wp.alerts.length > 0 ? '#ef4444' : (idx === 0 ? '#22c55e' : idx === waypoints.length - 1 ? '#ef4444' : '#3b82f6');
+    const label = wp.weather?.temperature ? `${wp.weather.temperature}°` : (wp.alerts.length > 0 ? '!' : '?');
+    return `
+      L.circleMarker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {
+        radius: 12,
+        fillColor: '${color}',
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 1
+      }).addTo(map).bindPopup('${wp.waypoint.name || `Point ${idx}`}: ${label}');
+    `;
+  }).join('\n');
+
+  const routeCoordsJs = routeCoords.map(c => `[${c[0]}, ${c[1]}]`).join(',');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        * { margin: 0; padding: 0; }
+        html, body, #map { width: 100%; height: 100%; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        var map = L.map('map', { zoomControl: false }).setView([${center[0]}, ${center[1]}], 6);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; CARTO'
+        }).addTo(map);
+        
+        var routeCoords = [${routeCoordsJs}];
+        L.polyline(routeCoords, {color: '#ef4444', weight: 4}).addTo(map);
+        
+        ${markersJs}
+        
+        map.fitBounds(routeCoords);
+      </script>
+    </body>
+    </html>
+  `;
 }
 
 export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [showWeatherPanel, setShowWeatherPanel] = useState(true);
-  const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
     if (params.routeData) {
@@ -153,8 +207,7 @@ export default function RouteScreen() {
         const data = JSON.parse(params.routeData as string);
         setRouteData(data);
         
-        // Schedule notification if severe weather
-        if (data.has_severe_weather) {
+        if (data.has_severe_weather && Platform.OS !== 'web') {
           scheduleWeatherAlert(data);
         }
       } catch (e) {
@@ -189,70 +242,25 @@ export default function RouteScreen() {
     );
   }
 
-  const routeCoordinates = decodePolyline(routeData.route_geometry);
   const allAlerts = routeData.waypoints.flatMap((wp) => wp.alerts);
   const uniqueAlerts = allAlerts.filter(
     (alert, index, self) => index === self.findIndex((a) => a.id === alert.id)
   );
   const totalDistance = calculateTotalDistance(routeData.waypoints);
   const hasAlerts = uniqueAlerts.length > 0;
+  const mapHtml = generateMapHtml(routeData.route_geometry, routeData.waypoints);
 
   return (
     <View style={styles.container}>
-      {/* Map */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={{
-          latitude: routeCoordinates[Math.floor(routeCoordinates.length / 2)]?.latitude || 40,
-          longitude: routeCoordinates[Math.floor(routeCoordinates.length / 2)]?.longitude || -95,
-          latitudeDelta: 8,
-          longitudeDelta: 8,
-        }}
-        onMapReady={() => {
-          if (mapRef.current && routeCoordinates.length > 0) {
-            setTimeout(() => {
-              mapRef.current?.fitToCoordinates(routeCoordinates, {
-                edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-                animated: true,
-              });
-            }, 100);
-          }
-        }}
-      >
-        {/* Route Line */}
-        <Polyline
-          coordinates={routeCoordinates}
-          strokeColor="#ef4444"
-          strokeWidth={4}
+      {/* Map WebView */}
+      <View style={styles.mapContainer}>
+        <WebView
+          style={styles.map}
+          source={{ html: mapHtml }}
+          scrollEnabled={false}
+          javaScriptEnabled={true}
         />
-        
-        {/* Weather Markers */}
-        {routeData.waypoints.map((wp, index) => (
-          <Marker
-            key={index}
-            coordinate={{
-              latitude: wp.waypoint.lat,
-              longitude: wp.waypoint.lon,
-            }}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={[
-              styles.markerContainer,
-              wp.alerts.length > 0 && styles.markerAlert
-            ]}>
-              {wp.alerts.length > 0 ? (
-                <Ionicons name="warning" size={16} color="#fff" />
-              ) : wp.weather ? (
-                <Text style={styles.markerTemp}>{wp.weather.temperature}°</Text>
-              ) : (
-                <Ionicons name="help" size={14} color="#fff" />
-              )}
-            </View>
-          </Marker>
-        ))}
-      </MapView>
+      </View>
 
       {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
@@ -403,6 +411,8 @@ export default function RouteScreen() {
                 )}
               </View>
             ))}
+            
+            <View style={{ height: 40 }} />
           </ScrollView>
         </View>
       )}
@@ -426,8 +436,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
   },
-  map: {
+  mapContainer: {
     ...StyleSheet.absoluteFillObject,
+  },
+  map: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
   },
   headerSafe: {
     position: 'absolute',
@@ -485,25 +499,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
-  },
-  markerContainer: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderWidth: 2,
-    borderColor: '#fff',
-    minWidth: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markerAlert: {
-    backgroundColor: '#dc2626',
-  },
-  markerTemp: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
   },
   weatherPanel: {
     position: 'absolute',
