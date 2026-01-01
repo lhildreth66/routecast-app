@@ -77,15 +77,17 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ -e 
+android-sdk/ 
 # Environment files
 *.env
 *.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
+# Expo / Metro cache
+frontend/.metro-cache/
+
+# Python
+venv/
+__pycache__/
+
+# Env files
+.env
+# Node lock files (root/backend not used)
