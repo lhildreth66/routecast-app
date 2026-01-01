@@ -335,13 +335,13 @@ export default function RouteScreen() {
             </Text>
           </View>
           <TouchableOpacity 
-            style={[styles.markerToggle, !showTempMarkers && styles.markerToggleOff]}
-            onPress={() => setShowTempMarkers(!showTempMarkers)}
+            style={[styles.markerToggle, !showAlertMarkers && styles.markerToggleOff]}
+            onPress={() => setShowAlertMarkers(!showAlertMarkers)}
           >
             <Ionicons 
-              name="thermometer-outline" 
+              name="warning" 
               size={20} 
-              color={showTempMarkers ? '#3b82f6' : '#6b7280'} 
+              color={showAlertMarkers ? '#ef4444' : '#6b7280'} 
             />
           </TouchableOpacity>
           <TouchableOpacity 
