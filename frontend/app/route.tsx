@@ -633,6 +633,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
   },
+  webMapPlaceholder: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  webMapText: {
+    color: '#52525b',
+    fontSize: 14,
+    marginTop: 12,
+  },
   alertTags: {
     flexDirection: 'row',
     flexWrap: 'wrap',
