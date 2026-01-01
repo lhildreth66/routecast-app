@@ -224,6 +224,39 @@ def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = 
         logger.error(f"Error extracting waypoints: {e}")
         return []
 
+async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
+    """Reverse geocode coordinates to get city, state name."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json"
+            params = {
+                'access_token': MAPBOX_ACCESS_TOKEN,
+                'types': 'place,locality',
+                'limit': 1
+            }
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('features') and len(data['features']) > 0:
+                feature = data['features'][0]
+                place_name = feature.get('text', '')
+                
+                # Extract state from context
+                context = feature.get('context', [])
+                state = ''
+                for ctx in context:
+                    if ctx.get('id', '').startswith('region'):
+                        state = ctx.get('short_code', '').replace('US-', '')
+                        break
+                
+                if place_name and state:
+                    return f"{place_name}, {state}"
+                return place_name or None
+    except Exception as e:
+        logger.error(f"Reverse geocoding error for {lat},{lon}: {e}")
+    return None
+
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """Geocode a location string to coordinates using Mapbox."""
     try:
