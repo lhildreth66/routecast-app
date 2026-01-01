@@ -314,6 +314,16 @@ export default function RouteScreen() {
             </Text>
           </View>
           <TouchableOpacity 
+            style={[styles.markerToggle, !showTempMarkers && styles.markerToggleOff]}
+            onPress={() => setShowTempMarkers(!showTempMarkers)}
+          >
+            <Ionicons 
+              name="thermometer-outline" 
+              size={20} 
+              color={showTempMarkers ? '#3b82f6' : '#6b7280'} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity 
             style={styles.toggleButton}
             onPress={() => setShowWeatherPanel(!showWeatherPanel)}
           >
