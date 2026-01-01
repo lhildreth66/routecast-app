@@ -527,6 +527,15 @@ const styles = StyleSheet.create({
   toggleButton: {
     padding: 8,
   },
+  markerToggle: {
+    padding: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderRadius: 8,
+    marginRight: 4,
+  },
+  markerToggleOff: {
+    backgroundColor: 'rgba(107, 114, 128, 0.2)',
+  },
   alertBanner: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 110 : 80,
