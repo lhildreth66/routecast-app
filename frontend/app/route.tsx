@@ -12,8 +12,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import MapView, { Polyline, Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Notifications from 'expo-notifications';
+
+// Conditionally import MapView for native platforms
+let MapView: any = null;
+let Polyline: any = null;
+let Marker: any = null;
+
+if (Platform.OS !== 'web') {
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Polyline = Maps.Polyline;
+  Marker = Maps.Marker;
+}
 
 const { width } = Dimensions.get('window');
 
