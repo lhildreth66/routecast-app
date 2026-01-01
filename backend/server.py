@@ -283,7 +283,7 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     return alerts
 
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str) -> str:
-    """Generate AI-powered weather summary using Gemini Flash."""
+    """Generate AI-powered weather summary using Gemini Flash via Emergent."""
     try:
         # Build weather context
         weather_info = []
@@ -319,13 +319,17 @@ Provide a 2-3 sentence summary focusing on:
 
 Be concise and practical."""
 
-        response = await asyncio.to_thread(
-            genai_client.models.generate_content,
-            model='gemini-2.0-flash',
-            contents=prompt
+        response = await openai_client.chat.completions.create(
+            model="gemini-2.0-flash",
+            messages=[
+                {"role": "system", "content": "You are a helpful travel weather assistant providing concise, driver-friendly weather summaries."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.7
         )
         
-        return response.text if response.text else "Unable to generate summary."
+        return response.choices[0].message.content if response.choices else "Unable to generate summary."
     except Exception as e:
         logger.error(f"AI summary error: {e}")
         return f"Weather summary unavailable. Check individual waypoints for conditions."
