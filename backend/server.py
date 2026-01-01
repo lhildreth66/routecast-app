@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 import httpx
 import polyline
-from google import genai
+from openai import AsyncOpenAI
 import asyncio
 import math
 
@@ -27,8 +27,11 @@ db = client[os.environ['DB_NAME']]
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
-# Configure Gemini client
-genai_client = genai.Client(api_key=EMERGENT_LLM_KEY)
+# Configure OpenAI client with Emergent LLM key
+openai_client = AsyncOpenAI(
+    api_key=EMERGENT_LLM_KEY,
+    base_url="https://api.emergentagi.com/v1"
+)
 
 # NOAA API Headers
 NOAA_HEADERS = {
