@@ -520,8 +520,8 @@ export default function RouteScreen() {
                   <View key={index} style={styles.waypointCard}>
                     <View style={styles.waypointHeader}>
                       <View style={styles.waypointLabel}>
-                        <Text style={styles.waypointName}>
-                          {index === 0 ? 'START' : index === routeData.waypoints.length - 1 ? 'END' : `POINT ${index}`}
+                        <Text style={styles.waypointName} numberOfLines={1}>
+                          {wp.waypoint.name || (index === 0 ? 'Start' : index === routeData.waypoints.length - 1 ? 'End' : `Point ${index}`)}
                         </Text>
                         {wp.alerts.length > 0 && (
                           <View style={styles.alertBadge}>
