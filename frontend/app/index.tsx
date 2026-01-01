@@ -11,19 +11,29 @@ import {
   Platform,
   Keyboard,
   Switch,
-  ImageBackground,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { format } from 'date-fns';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+interface StopPoint {
+  location: string;
+  type: string;
+}
 
 interface SavedRoute {
   id: string;
   origin: string;
   destination: string;
+  stops?: StopPoint[];
+  is_favorite?: boolean;
   created_at: string;
 }
 
@@ -34,17 +44,53 @@ export default function HomeScreen() {
   const [error, setError] = useState('');
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
+  const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
+  const [showFavorites, setShowFavorites] = useState(false);
+  
+  // Departure time
+  const [departureTime, setDepartureTime] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [useCustomTime, setUseCustomTime] = useState(false);
+  
+  // Multi-stop
+  const [stops, setStops] = useState<StopPoint[]>([]);
+  const [showAddStop, setShowAddStop] = useState(false);
+  const [newStopLocation, setNewStopLocation] = useState('');
+  const [newStopType, setNewStopType] = useState('stop');
 
   useEffect(() => {
     fetchRecentRoutes();
+    fetchFavoriteRoutes();
+    loadCachedRoute();
   }, []);
+
+  const loadCachedRoute = async () => {
+    try {
+      const cached = await AsyncStorage.getItem('lastRoute');
+      if (cached) {
+        const data = JSON.parse(cached);
+        // Optionally pre-fill from cache
+      }
+    } catch (e) {
+      console.log('No cached route');
+    }
+  };
 
   const fetchRecentRoutes = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/routes/history`);
-      setRecentRoutes(response.data.slice(0, 3));
+      setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
       console.log('Error fetching history:', err);
+    }
+  };
+
+  const fetchFavoriteRoutes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/api/routes/favorites`);
+      setFavoriteRoutes(response.data);
+    } catch (err) {
+      console.log('Error fetching favorites:', err);
     }
   };
 
@@ -59,10 +105,20 @@ export default function HomeScreen() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_BASE}/api/route/weather`, {
+      const requestData: any = {
         origin: origin.trim(),
         destination: destination.trim(),
-      });
+        stops: stops,
+      };
+      
+      if (useCustomTime) {
+        requestData.departure_time = departureTime.toISOString();
+      }
+
+      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
+      
+      // Cache the route for offline
+      await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
 
       router.push({
         pathname: '/route',
@@ -82,11 +138,65 @@ export default function HomeScreen() {
   const handleRecentRoute = (route: SavedRoute) => {
     setOrigin(route.origin);
     setDestination(route.destination);
+    if (route.stops) {
+      setStops(route.stops);
+    }
+  };
+
+  const addToFavorites = async () => {
+    if (!origin.trim() || !destination.trim()) {
+      setError('Enter a route first to save as favorite');
+      return;
+    }
+
+    try {
+      await axios.post(`${API_BASE}/api/routes/favorites`, {
+        origin: origin.trim(),
+        destination: destination.trim(),
+        stops: stops,
+      });
+      fetchFavoriteRoutes();
+    } catch (err) {
+      console.error('Error saving favorite:', err);
+    }
+  };
+
+  const removeFavorite = async (id: string) => {
+    try {
+      await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
+      fetchFavoriteRoutes();
+    } catch (err) {
+      console.error('Error removing favorite:', err);
+    }
+  };
+
+  const addStop = () => {
+    if (newStopLocation.trim()) {
+      setStops([...stops, { location: newStopLocation.trim(), type: newStopType }]);
+      setNewStopLocation('');
+      setShowAddStop(false);
+    }
+  };
+
+  const removeStop = (index: number) => {
+    setStops(stops.filter((_, i) => i !== index));
+  };
+
+  const swapLocations = () => {
+    const temp = origin;
+    setOrigin(destination);
+    setDestination(temp);
+  };
+
+  const stopTypeIcons: Record<string, string> = {
+    stop: 'location',
+    gas: 'car',
+    food: 'restaurant',
+    rest: 'bed',
   };
 
   return (
     <View style={styles.container}>
-      {/* Map Background Pattern */}
       <View style={styles.mapBackground}>
         <View style={styles.mapOverlay} />
       </View>
@@ -112,6 +222,12 @@ export default function HomeScreen() {
                   <Text style={styles.title}>Routecast</Text>
                   <Text style={styles.subtitle}>Weather forecasts for your journey</Text>
                 </View>
+                <TouchableOpacity 
+                  style={styles.favoriteButton}
+                  onPress={addToFavorites}
+                >
+                  <Ionicons name="heart-outline" size={24} color="#eab308" />
+                </TouchableOpacity>
               </View>
 
               {/* App Description */}
@@ -139,6 +255,34 @@ export default function HomeScreen() {
                 </View>
               </View>
 
+              {/* Stops */}
+              {stops.length > 0 && (
+                <View style={styles.stopsContainer}>
+                  {stops.map((stop, index) => (
+                    <View key={index} style={styles.stopItem}>
+                      <Ionicons 
+                        name={stopTypeIcons[stop.type] as any || 'location'} 
+                        size={16} 
+                        color="#f59e0b" 
+                      />
+                      <Text style={styles.stopText} numberOfLines={1}>{stop.location}</Text>
+                      <TouchableOpacity onPress={() => removeStop(index)}>
+                        <Ionicons name="close-circle" size={18} color="#6b7280" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Add Stop Button */}
+              <TouchableOpacity 
+                style={styles.addStopButton}
+                onPress={() => setShowAddStop(true)}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#60a5fa" />
+                <Text style={styles.addStopText}>Add Stop</Text>
+              </TouchableOpacity>
+
               {/* Destination Input */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>DESTINATION</Text>
@@ -155,7 +299,35 @@ export default function HomeScreen() {
                     returnKeyType="done"
                     onSubmitEditing={handleGetWeather}
                   />
+                  <TouchableOpacity onPress={swapLocations} style={styles.swapButton}>
+                    <Ionicons name="swap-vertical" size={20} color="#60a5fa" />
+                  </TouchableOpacity>
                 </View>
+              </View>
+
+              {/* Departure Time */}
+              <View style={styles.departureSection}>
+                <View style={styles.departureToggle}>
+                  <Ionicons name="time-outline" size={20} color="#a1a1aa" />
+                  <Text style={styles.departureLabel}>Custom Departure Time</Text>
+                  <Switch
+                    value={useCustomTime}
+                    onValueChange={setUseCustomTime}
+                    trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                    thumbColor={useCustomTime ? '#eab308' : '#71717a'}
+                  />
+                </View>
+                {useCustomTime && (
+                  <TouchableOpacity 
+                    style={styles.timeButton}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={styles.timeButtonText}>
+                      {format(departureTime, 'MMM d, h:mm a')}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Weather Alerts Toggle */}
@@ -198,42 +370,171 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Recent Routes */}
-            {recentRoutes.length > 0 && (
-              <View style={styles.recentSection}>
-                <Text style={styles.recentTitle}>Recent Routes</Text>
-                {recentRoutes.map((route) => (
+            {/* Tabs for Recent/Favorites */}
+            <View style={styles.tabsContainer}>
+              <TouchableOpacity 
+                style={[styles.tab, !showFavorites && styles.tabActive]}
+                onPress={() => setShowFavorites(false)}
+              >
+                <Ionicons name="time-outline" size={18} color={!showFavorites ? '#eab308' : '#6b7280'} />
+                <Text style={[styles.tabText, !showFavorites && styles.tabTextActive]}>Recent</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.tab, showFavorites && styles.tabActive]}
+                onPress={() => setShowFavorites(true)}
+              >
+                <Ionicons name="heart" size={18} color={showFavorites ? '#eab308' : '#6b7280'} />
+                <Text style={[styles.tabText, showFavorites && styles.tabTextActive]}>Favorites</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Routes List */}
+            <View style={styles.routesSection}>
+              {(showFavorites ? favoriteRoutes : recentRoutes).length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons 
+                    name={showFavorites ? "heart-outline" : "map-outline"} 
+                    size={48} 
+                    color="#374151" 
+                  />
+                  <Text style={styles.emptyText}>
+                    {showFavorites ? 'No favorite routes' : 'No recent routes'}
+                  </Text>
+                </View>
+              ) : (
+                (showFavorites ? favoriteRoutes : recentRoutes).map((route) => (
                   <TouchableOpacity
                     key={route.id}
-                    style={styles.recentCard}
+                    style={styles.routeCard}
                     onPress={() => handleRecentRoute(route)}
                     activeOpacity={0.7}
                   >
-                    <View style={styles.recentRoute}>
-                      <View style={styles.recentLocation}>
-                        <View style={styles.recentDot} />
-                        <Text style={styles.recentText} numberOfLines={1}>
-                          {route.origin}
-                        </Text>
-                      </View>
-                      <View style={styles.recentArrow}>
-                        <Ionicons name="arrow-down" size={14} color="#6b7280" />
-                      </View>
-                      <View style={styles.recentLocation}>
-                        <View style={[styles.recentDot, styles.recentDotEnd]} />
-                        <Text style={styles.recentText} numberOfLines={1}>
-                          {route.destination}
-                        </Text>
+                    <View style={styles.routeInfo}>
+                      <View style={styles.routeLocations}>
+                        <View style={styles.routeLocation}>
+                          <View style={styles.routeDot} />
+                          <Text style={styles.routeText} numberOfLines={1}>
+                            {route.origin}
+                          </Text>
+                        </View>
+                        {route.stops && route.stops.length > 0 && (
+                          <View style={styles.routeStops}>
+                            <Text style={styles.routeStopsText}>
+                              +{route.stops.length} stop{route.stops.length > 1 ? 's' : ''}
+                            </Text>
+                          </View>
+                        )}
+                        <View style={styles.routeLocation}>
+                          <View style={[styles.routeDot, styles.routeDotEnd]} />
+                          <Text style={styles.routeText} numberOfLines={1}>
+                            {route.destination}
+                          </Text>
+                        </View>
                       </View>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="#6b7280" />
+                    {showFavorites ? (
+                      <TouchableOpacity onPress={() => removeFavorite(route.id)}>
+                        <Ionicons name="heart-dislike" size={20} color="#ef4444" />
+                      </TouchableOpacity>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={20} color="#6b7280" />
+                    )}
                   </TouchableOpacity>
-                ))}
-              </View>
-            )}
+                ))
+              )}
+            </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Date Time Picker Modal */}
+      {showDatePicker && (
+        <Modal transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Departure Time</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={departureTime}
+                mode="datetime"
+                display="spinner"
+                onChange={(event, date) => {
+                  if (date) setDepartureTime(date);
+                }}
+                textColor="#fff"
+                minimumDate={new Date()}
+              />
+              <TouchableOpacity 
+                style={styles.modalButton}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={styles.modalButtonText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Add Stop Modal */}
+      {showAddStop && (
+        <Modal transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add Stop</Text>
+                <TouchableOpacity onPress={() => setShowAddStop(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Enter stop location"
+                placeholderTextColor="#6b7280"
+                value={newStopLocation}
+                onChangeText={setNewStopLocation}
+              />
+              
+              <Text style={styles.stopTypeLabel}>Stop Type</Text>
+              <View style={styles.stopTypes}>
+                {[
+                  { type: 'stop', label: 'Stop', icon: 'location' },
+                  { type: 'gas', label: 'Gas', icon: 'car' },
+                  { type: 'food', label: 'Food', icon: 'restaurant' },
+                  { type: 'rest', label: 'Rest', icon: 'bed' },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.type}
+                    style={[
+                      styles.stopTypeButton,
+                      newStopType === item.type && styles.stopTypeButtonActive,
+                    ]}
+                    onPress={() => setNewStopType(item.type)}
+                  >
+                    <Ionicons 
+                      name={item.icon as any} 
+                      size={20} 
+                      color={newStopType === item.type ? '#eab308' : '#6b7280'} 
+                    />
+                    <Text style={[
+                      styles.stopTypeText,
+                      newStopType === item.type && styles.stopTypeTextActive
+                    ]}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity style={styles.modalButton} onPress={addStop}>
+                <Text style={styles.modalButtonText}>Add Stop</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -259,93 +560,157 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingTop: 24,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   mainCard: {
     backgroundColor: '#27272a',
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+    padding: 18,
+    marginBottom: 16,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   iconContainer: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     backgroundColor: '#eab308',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
+    marginRight: 12,
   },
   headerText: {
     flex: 1,
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: '#ffffff',
     marginBottom: 2,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#a1a1aa',
+  },
+  favoriteButton: {
+    padding: 8,
   },
   descriptionBox: {
     backgroundColor: 'rgba(234, 179, 8, 0.1)',
     borderRadius: 10,
     padding: 12,
-    marginBottom: 20,
+    marginBottom: 16,
     borderLeftWidth: 3,
     borderLeftColor: '#eab308',
   },
   descriptionText: {
     color: '#d4d4d8',
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 18,
   },
   inputSection: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   inputLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#a1a1aa',
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#3f3f46',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#52525b',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
   originIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   destinationIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: '#ffffff',
-    paddingVertical: 14,
+    paddingVertical: 12,
+    fontWeight: '500',
+  },
+  swapButton: {
+    padding: 8,
+  },
+  stopsContainer: {
+    marginBottom: 8,
+  },
+  stopItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 6,
+    gap: 8,
+  },
+  stopText: {
+    flex: 1,
+    color: '#e4e4e7',
+    fontSize: 14,
+  },
+  addStopButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  addStopText: {
+    color: '#60a5fa',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  departureSection: {
+    marginBottom: 12,
+  },
+  departureToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  departureLabel: {
+    flex: 1,
+    color: '#e4e4e7',
+    fontSize: 14,
+  },
+  timeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  timeButtonText: {
+    color: '#eab308',
+    fontSize: 14,
     fontWeight: '500',
   },
   alertsToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    marginBottom: 16,
+    paddingVertical: 8,
+    marginBottom: 12,
   },
   alertsLeft: {
     flexDirection: 'row',
@@ -353,7 +718,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   alertsText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
   },
@@ -361,20 +726,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    padding: 12,
+    padding: 10,
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 8,
   },
   errorText: {
     color: '#ef4444',
-    fontSize: 14,
+    fontSize: 13,
     flex: 1,
   },
   button: {
     backgroundColor: '#eab308',
-    borderRadius: 12,
-    paddingVertical: 16,
+    borderRadius: 10,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -385,53 +750,164 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#1a1a1a',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
-  recentSection: {
-    marginTop: 8,
-  },
-  recentTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#a1a1aa',
+  tabsContainer: {
+    flexDirection: 'row',
     marginBottom: 12,
-    letterSpacing: 0.5,
+    gap: 8,
   },
-  recentCard: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  recentRoute: {
+  tab: {
     flex: 1,
-  },
-  recentLocation: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: '#27272a',
+    borderRadius: 10,
   },
-  recentDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#22c55e',
+  tabActive: {
+    backgroundColor: '#3f3f46',
   },
-  recentDotEnd: {
-    backgroundColor: '#ef4444',
-  },
-  recentArrow: {
-    marginLeft: 4,
-    marginVertical: 2,
-  },
-  recentText: {
-    color: '#e4e4e7',
+  tabText: {
+    color: '#6b7280',
     fontSize: 14,
     fontWeight: '500',
+  },
+  tabTextActive: {
+    color: '#eab308',
+  },
+  routesSection: {
+    minHeight: 100,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    backgroundColor: '#27272a',
+    borderRadius: 12,
+  },
+  emptyText: {
+    color: '#6b7280',
+    fontSize: 14,
+    marginTop: 12,
+  },
+  routeCard: {
+    backgroundColor: '#27272a',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  routeInfo: {
     flex: 1,
+  },
+  routeLocations: {
+    gap: 2,
+  },
+  routeLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  routeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+  },
+  routeDotEnd: {
+    backgroundColor: '#ef4444',
+  },
+  routeText: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    flex: 1,
+  },
+  routeStops: {
+    marginLeft: 16,
+    paddingVertical: 2,
+  },
+  routeStopsText: {
+    color: '#f59e0b',
+    fontSize: 11,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#27272a',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalInput: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#fff',
+    marginBottom: 16,
+  },
+  stopTypeLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 10,
+    letterSpacing: 0.5,
+  },
+  stopTypes: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  stopTypeButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    gap: 4,
+  },
+  stopTypeButtonActive: {
+    backgroundColor: '#52525b',
+    borderWidth: 1,
+    borderColor: '#eab308',
+  },
+  stopTypeText: {
+    color: '#6b7280',
+    fontSize: 11,
+  },
+  stopTypeTextActive: {
+    color: '#eab308',
+  },
+  modalButton: {
+    backgroundColor: '#eab308',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#1a1a1a',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
