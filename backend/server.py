@@ -741,7 +741,7 @@ async def get_favorite_routes():
     try:
         routes = await db.favorites.find().sort("created_at", -1).limit(20).to_list(20)
         return [SavedRoute(
-            id=str(r.get('_id', r.get('id'))),
+            id=r.get('id', str(r.get('_id'))),
             origin=r['origin'],
             destination=r['destination'],
             stops=r.get('stops', []),
