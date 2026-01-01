@@ -641,10 +641,35 @@ async def get_route_weather(request: RouteRequest):
     waypoints_weather = []
     has_severe = False
     
-    async def fetch_waypoint_weather(wp: Waypoint) -> WaypointWeather:
+    async def fetch_waypoint_weather(wp: Waypoint, index: int, total: int, origin_name: str, dest_name: str) -> WaypointWeather:
         nonlocal has_severe
         weather = await get_noaa_weather(wp.lat, wp.lon)
         alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        
+        # Get location name via reverse geocoding
+        location_name = await reverse_geocode(wp.lat, wp.lon)
+        
+        # Build display name with point number and location
+        if index == 0:
+            display_name = f"Start - {origin_name}"
+        elif index == total - 1:
+            display_name = f"End - {dest_name}"
+        else:
+            point_label = f"Point {index}"
+            if location_name:
+                display_name = f"{point_label} - {location_name}"
+            else:
+                display_name = point_label
+        
+        # Update waypoint with location name
+        updated_wp = Waypoint(
+            lat=wp.lat,
+            lon=wp.lon,
+            name=display_name,
+            distance_from_start=wp.distance_from_start,
+            eta_minutes=wp.eta_minutes,
+            arrival_time=wp.arrival_time
+        )
         
         # Check for severe weather
         severe_severities = ['Extreme', 'Severe']
@@ -652,13 +677,14 @@ async def get_route_weather(request: RouteRequest):
             has_severe = True
         
         return WaypointWeather(
-            waypoint=wp,
+            waypoint=updated_wp,
             weather=weather,
             alerts=alerts
         )
     
     # Fetch weather concurrently
-    tasks = [fetch_waypoint_weather(wp) for wp in waypoints]
+    total_waypoints = len(waypoints)
+    tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
     waypoints_weather = await asyncio.gather(*tasks)
     
     # Generate packing suggestions
