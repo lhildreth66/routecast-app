@@ -10,9 +10,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Switch,
+  ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import axios from 'axios';
 
@@ -30,8 +32,8 @@ export default function HomeScreen() {
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
 
   useEffect(() => {
     fetchRecentRoutes();
@@ -39,13 +41,10 @@ export default function HomeScreen() {
 
   const fetchRecentRoutes = async () => {
     try {
-      setLoadingHistory(true);
       const response = await axios.get(`${API_BASE}/api/routes/history`);
-      setRecentRoutes(response.data);
+      setRecentRoutes(response.data.slice(0, 3));
     } catch (err) {
       console.log('Error fetching history:', err);
-    } finally {
-      setLoadingHistory(false);
     }
   };
 
@@ -85,256 +84,263 @@ export default function HomeScreen() {
     setDestination(route.destination);
   };
 
-  const swapLocations = () => {
-    const temp = origin;
-    setOrigin(destination);
-    setDestination(temp);
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+    <View style={styles.container}>
+      {/* Map Background Pattern */}
+      <View style={styles.mapBackground}>
+        <View style={styles.mapOverlay} />
+      </View>
+
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.logoContainer}>
-              <Ionicons name="cloudy" size={40} color="#60a5fa" />
-              <Text style={styles.title}>Routecast</Text>
-            </View>
-            <Text style={styles.subtitle}>
-              Weather forecasts along your route
-            </Text>
-          </View>
-
-          {/* Input Section */}
-          <View style={styles.inputSection}>
-            <View style={styles.inputContainer}>
-              <View style={styles.inputWrapper}>
-                <View style={styles.iconCircle}>
-                  <Ionicons name="location" size={20} color="#22c55e" />
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Main Card */}
+            <View style={styles.mainCard}>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={styles.iconContainer}>
+                  <MaterialCommunityIcons name="routes" size={28} color="#1a1a1a" />
                 </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Starting point"
-                  placeholderTextColor="#6b7280"
-                  value={origin}
-                  onChangeText={setOrigin}
-                  returnKeyType="next"
+                <View style={styles.headerText}>
+                  <Text style={styles.title}>Route Planner</Text>
+                  <Text style={styles.subtitle}>Check weather along your drive</Text>
+                </View>
+              </View>
+
+              {/* Origin Input */}
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>ORIGIN</Text>
+                <View style={styles.inputWrapper}>
+                  <View style={styles.originIcon}>
+                    <Ionicons name="location" size={20} color="#22c55e" />
+                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter starting location"
+                    placeholderTextColor="#6b7280"
+                    value={origin}
+                    onChangeText={setOrigin}
+                    returnKeyType="next"
+                  />
+                </View>
+              </View>
+
+              {/* Destination Input */}
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>DESTINATION</Text>
+                <View style={styles.inputWrapper}>
+                  <View style={styles.destinationIcon}>
+                    <Ionicons name="navigate" size={20} color="#ef4444" />
+                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter destination"
+                    placeholderTextColor="#6b7280"
+                    value={destination}
+                    onChangeText={setDestination}
+                    returnKeyType="done"
+                    onSubmitEditing={handleGetWeather}
+                  />
+                </View>
+              </View>
+
+              {/* Weather Alerts Toggle */}
+              <View style={styles.alertsToggle}>
+                <View style={styles.alertsLeft}>
+                  <Ionicons name="notifications-outline" size={22} color="#eab308" />
+                  <Text style={styles.alertsText}>Push Weather Alerts</Text>
+                </View>
+                <Switch
+                  value={alertsEnabled}
+                  onValueChange={setAlertsEnabled}
+                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
                 />
               </View>
 
+              {/* Error Message */}
+              {error ? (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              {/* Check Route Button */}
               <TouchableOpacity
-                style={styles.swapButton}
-                onPress={swapLocations}
+                style={[styles.button, loading && styles.buttonDisabled]}
+                onPress={handleGetWeather}
+                disabled={loading}
+                activeOpacity={0.8}
               >
-                <Ionicons name="swap-vertical" size={24} color="#60a5fa" />
+                {loading ? (
+                  <ActivityIndicator color="#1a1a1a" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="navigate" size={22} color="#1a1a1a" />
+                    <Text style={styles.buttonText}>CHECK ROUTE WEATHER</Text>
+                  </>
+                )}
               </TouchableOpacity>
-
-              <View style={styles.inputWrapper}>
-                <View style={styles.iconCircle}>
-                  <Ionicons name="flag" size={20} color="#ef4444" />
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Destination"
-                  placeholderTextColor="#6b7280"
-                  value={destination}
-                  onChangeText={setDestination}
-                  returnKeyType="done"
-                  onSubmitEditing={handleGetWeather}
-                />
-              </View>
             </View>
 
-            {error ? (
-              <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle" size={18} color="#ef4444" />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[
-                styles.button,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={handleGetWeather}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="navigate" size={22} color="#fff" />
-                  <Text style={styles.buttonText}>Get Route Weather</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Recent Routes */}
-          <View style={styles.recentSection}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="time-outline" size={20} color="#9ca3af" />
-              <Text style={styles.sectionTitle}>Recent Routes</Text>
-            </View>
-
-            {loadingHistory ? (
-              <ActivityIndicator color="#60a5fa" style={styles.loader} />
-            ) : recentRoutes.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="map-outline" size={48} color="#374151" />
-                <Text style={styles.emptyText}>No recent routes</Text>
-                <Text style={styles.emptySubtext}>
-                  Your searched routes will appear here
-                </Text>
-              </View>
-            ) : (
-              recentRoutes.map((route) => (
-                <TouchableOpacity
-                  key={route.id}
-                  style={styles.routeCard}
-                  onPress={() => handleRecentRoute(route)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.routeInfo}>
-                    <View style={styles.routeLocations}>
-                      <View style={styles.routeLocation}>
-                        <Ionicons name="ellipse" size={10} color="#22c55e" />
-                        <Text style={styles.routeText} numberOfLines={1}>
+            {/* Recent Routes */}
+            {recentRoutes.length > 0 && (
+              <View style={styles.recentSection}>
+                <Text style={styles.recentTitle}>Recent Routes</Text>
+                {recentRoutes.map((route) => (
+                  <TouchableOpacity
+                    key={route.id}
+                    style={styles.recentCard}
+                    onPress={() => handleRecentRoute(route)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.recentRoute}>
+                      <View style={styles.recentLocation}>
+                        <View style={styles.recentDot} />
+                        <Text style={styles.recentText} numberOfLines={1}>
                           {route.origin}
                         </Text>
                       </View>
-                      <View style={styles.routeDots}>
-                        <Ionicons
-                          name="ellipsis-vertical"
-                          size={12}
-                          color="#4b5563"
-                        />
+                      <View style={styles.recentArrow}>
+                        <Ionicons name="arrow-down" size={14} color="#6b7280" />
                       </View>
-                      <View style={styles.routeLocation}>
-                        <Ionicons name="ellipse" size={10} color="#ef4444" />
-                        <Text style={styles.routeText} numberOfLines={1}>
+                      <View style={styles.recentLocation}>
+                        <View style={[styles.recentDot, styles.recentDotEnd]} />
+                        <Text style={styles.recentText} numberOfLines={1}>
                           {route.destination}
                         </Text>
                       </View>
                     </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#6b7280" />
-                </TouchableOpacity>
-              ))
+                    <Ionicons name="chevron-forward" size={20} color="#6b7280" />
+                  </TouchableOpacity>
+                ))}
+              </View>
             )}
-          </View>
-
-          {/* Features */}
-          <View style={styles.featuresSection}>
-            <View style={styles.featureRow}>
-              <View style={styles.featureItem}>
-                <Ionicons name="rainy" size={24} color="#60a5fa" />
-                <Text style={styles.featureText}>Live Weather</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="warning" size={24} color="#f59e0b" />
-                <Text style={styles.featureText}>Alerts</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="sparkles" size={24} color="#a855f7" />
-                <Text style={styles.featureText}>AI Summary</Text>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0f0f0f',
+  },
+  mapBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#1a1a1a',
+  },
+  mapOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  safeArea: {
+    flex: 1,
   },
   keyboardView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    padding: 16,
+    paddingTop: 24,
     paddingBottom: 40,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: 32,
-    marginTop: 20,
+  mainCard: {
+    backgroundColor: '#27272a',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
   },
-  logoContainer: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
+    marginBottom: 24,
+  },
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  headerText: {
+    flex: 1,
   },
   title: {
-    fontSize: 36,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -1,
+    color: '#ffffff',
+    marginBottom: 2,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#9ca3af',
-    marginTop: 4,
+    fontSize: 14,
+    color: '#a1a1aa',
   },
   inputSection: {
-    marginBottom: 32,
-  },
-  inputContainer: {
-    backgroundColor: '#1f1f1f',
-    borderRadius: 16,
-    padding: 16,
     marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#a1a1aa',
+    letterSpacing: 1,
+    marginBottom: 8,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#3f3f46',
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    marginVertical: 6,
+    borderWidth: 1,
+    borderColor: '#52525b',
+    paddingHorizontal: 14,
   },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1f1f1f',
-    justifyContent: 'center',
-    alignItems: 'center',
+  originIcon: {
+    marginRight: 12,
+  },
+  destinationIcon: {
     marginRight: 12,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#fff',
-    paddingVertical: 12,
+    color: '#ffffff',
+    paddingVertical: 14,
+    fontWeight: '500',
   },
-  swapButton: {
-    alignSelf: 'center',
-    padding: 8,
-    backgroundColor: '#2a2a2a',
-    borderRadius: 20,
-    marginVertical: 4,
+  alertsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  alertsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  alertsText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
@@ -346,7 +352,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#eab308',
     borderRadius: 12,
     paddingVertical: 16,
     flexDirection: 'row',
@@ -355,90 +361,57 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   buttonDisabled: {
-    backgroundColor: '#1e40af',
     opacity: 0.7,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '600',
+    color: '#1a1a1a',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   recentSection: {
-    marginBottom: 24,
+    marginTop: 8,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#9ca3af',
-  },
-  loader: {
-    marginVertical: 20,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    backgroundColor: '#1f1f1f',
-    borderRadius: 16,
-  },
-  emptyText: {
-    color: '#6b7280',
-    fontSize: 16,
-    marginTop: 12,
-  },
-  emptySubtext: {
-    color: '#4b5563',
+  recentTitle: {
     fontSize: 14,
-    marginTop: 4,
+    fontWeight: '600',
+    color: '#a1a1aa',
+    marginBottom: 12,
+    letterSpacing: 0.5,
   },
-  routeCard: {
-    backgroundColor: '#1f1f1f',
+  recentCard: {
+    backgroundColor: '#27272a',
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  routeInfo: {
+  recentRoute: {
     flex: 1,
   },
-  routeLocations: {
-    gap: 2,
-  },
-  routeLocation: {
+  recentLocation: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  routeDots: {
-    marginLeft: 3,
-    marginVertical: -4,
+  recentDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#22c55e',
   },
-  routeText: {
-    color: '#e5e7eb',
-    fontSize: 15,
+  recentDotEnd: {
+    backgroundColor: '#ef4444',
+  },
+  recentArrow: {
+    marginLeft: 4,
+    marginVertical: 2,
+  },
+  recentText: {
+    color: '#e4e4e7',
+    fontSize: 14,
+    fontWeight: '500',
     flex: 1,
-  },
-  featuresSection: {
-    backgroundColor: '#1f1f1f',
-    borderRadius: 16,
-    padding: 20,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  featureItem: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  featureText: {
-    color: '#9ca3af',
-    fontSize: 13,
   },
 });
