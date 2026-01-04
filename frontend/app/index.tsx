@@ -21,7 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || https://routecast-backend.onrender.com;
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL ||"https://routecast-backend.onrender.com";
 
 interface StopPoint {
   location: string;
