@@ -563,25 +563,29 @@ async def generate_ai_summary(prompt: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful travel weather assistant providing concise, driver-friendly weather summaries."
+                    "content": (
+                        "You are a travel weather assistant. "
+                        "Write a concise, driver-friendly weather summary for a road trip. "
+                        "Rules: 2-4 short sentences max. "
+                        "If there are alerts, mention them first. "
+                        "Include 1-3 quick action tips (like slow down, allow extra time, pack gloves, watch for ice). "
+                        "No markdown, no bullets, plain text only."
+                    ),
                 },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt},
             ],
-            max_tokens=300,
-            temperature=0.7,
+            max_tokens=220,
+            temperature=0.4,
             timeout=8,
         )
 
-        if response.choices:
-            return response.choices[0].message.content or "Route forecast generated successfully."
+        if response.choices and response.choices[0].message and response.choices[0].message.content:
+            return response.choices[0].message.content.strip()
 
-        return "Route forecast generated successfully."
+        return ""
 
     except Exception:
-        return "Route forecast generated successfully."
+        return ""
 
 
 

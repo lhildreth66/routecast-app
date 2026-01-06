@@ -16,7 +16,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 import * as Speech from 'expo-speech';
-import * as Sharing from 'expo-sharing';
 import { format, parseISO } from 'date-fns';
 
 const { width, height } = Dimensions.get('window');
@@ -97,6 +96,7 @@ interface RouteData {
 
 // Decode polyline utility
 function decodePolyline(encoded: string): [number, number][] {
+  if (!encoded || typeof encoded !== 'string') return [];
   const points: [number, number][] = [];
   let index = 0;
   let lat = 0;
@@ -137,7 +137,7 @@ function decodePolyline(encoded: string): [number, number][] {
 function getWeatherIcon(conditions: string | null): string {
   if (!conditions) return 'cloud-outline';
   const c = conditions.toLowerCase();
-  
+
   if (c.includes('thunder') || c.includes('storm')) return 'thunderstorm';
   if (c.includes('rain') || c.includes('shower')) return 'rainy';
   if (c.includes('snow') || c.includes('flurr')) return 'snow';
@@ -149,35 +149,59 @@ function getWeatherIcon(conditions: string | null): string {
 }
 
 function calculateTotalDistance(waypoints: WaypointWeather[]): number {
-  if (waypoints.length === 0) return 0;
+  if (!waypoints || waypoints.length === 0) return 0;
   const last = waypoints[waypoints.length - 1];
-  return last.waypoint.distance_from_start || 0;
+  return last?.waypoint?.distance_from_start || 0;
 }
 
 function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = Math.round(minutes % 60);
+  const safe = Number.isFinite(minutes) ? minutes : 0;
+  const hours = Math.floor(safe / 60);
+  const mins = Math.round(safe % 60);
   return `${hours}h ${mins}m`;
 }
 
 function getPriorityColor(priority: string): string {
   switch (priority) {
-    case 'essential': return '#ef4444';
-    case 'recommended': return '#f59e0b';
-    case 'optional': return '#22c55e';
-    default: return '#6b7280';
+    case 'essential':
+      return '#ef4444';
+    case 'recommended':
+      return '#f59e0b';
+    case 'optional':
+      return '#22c55e';
+    default:
+      return '#6b7280';
   }
 }
 
+// ✅ Normalize AI summary so UI never shows blanks / "unavailable" placeholders
+function getDisplaySummary(ai_summary: string | null | undefined): string {
+  const s = (ai_summary ?? '').trim();
+  if (!s) return 'No AI summary available for this route.';
+  const lower = s.toLowerCase();
+  if (lower.includes('unavailable')) return 'No AI summary available for this route.';
+  return s;
+}
+
 // Generate HTML for WebView map
-function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], showAlertMarkers: boolean = true): string {
+function generateMapHtml(
+  routeGeometry: string,
+  waypoints: WaypointWeather[],
+  showAlertMarkers: boolean = true
+): string {
   const routeCoords = decodePolyline(routeGeometry);
-  const center = routeCoords[Math.floor(routeCoords.length / 2)];
-  
-  const alertWaypoints = waypoints.filter(wp => wp.alerts.length > 0);
-  
-  const markersJs = showAlertMarkers && alertWaypoints.length > 0 ? alertWaypoints.map((wp, idx) => {
-    return `
+  // Fallback center if polyline is empty
+  const center = routeCoords.length
+    ? routeCoords[Math.floor(routeCoords.length / 2)]
+    : [39.5, -98.35]; // center-ish of US
+
+  const alertWaypoints = (waypoints || []).filter((wp) => (wp.alerts || []).length > 0);
+
+  const markersJs =
+    showAlertMarkers && alertWaypoints.length > 0
+      ? alertWaypoints
+          .map((wp) => {
+            return `
       (function() {
         var icon = L.divIcon({
           className: '',
@@ -188,9 +212,13 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], sh
         L.marker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {icon: icon}).addTo(map);
       })();
     `;
-  }).join('\n') : '';
+          })
+          .join('\n')
+      : '';
 
-  const startEndMarkers = `
+  const startEndMarkers =
+    routeCoords.length >= 2
+      ? `
     (function() {
       var startIcon = L.divIcon({
         className: '',
@@ -200,7 +228,7 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], sh
       });
       L.marker([${routeCoords[0][0]}, ${routeCoords[0][1]}], {icon: startIcon}).addTo(map);
     })();
-    
+
     (function() {
       var endIcon = L.divIcon({
         className: '',
@@ -210,9 +238,10 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], sh
       });
       L.marker([${routeCoords[routeCoords.length - 1][0]}, ${routeCoords[routeCoords.length - 1][1]}], {icon: endIcon}).addTo(map);
     })();
-  `;
+  `
+      : '';
 
-  const routeCoordsJs = routeCoords.map(c => `[${c[0]}, ${c[1]}]`).join(',');
+  const routeCoordsJs = routeCoords.map((c) => `[${c[0]}, ${c[1]}]`).join(',');
 
   return `
     <!DOCTYPE html>
@@ -230,34 +259,38 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], sh
     <body>
       <div id="map"></div>
       <script>
-        var map = L.map('map', { 
+        var map = L.map('map', {
           zoomControl: false,
           attributionControl: false
         }).setView([${center[0]}, ${center[1]}], 6);
-        
+
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
           maxZoom: 19
         }).addTo(map);
-        
+
         var routeCoords = [${routeCoordsJs}];
-        
-        L.polyline(routeCoords, {
-          color: '#ff6b6b',
-          weight: 8,
-          opacity: 0.3
-        }).addTo(map);
-        
-        L.polyline(routeCoords, {
-          color: '#ef4444',
-          weight: 4,
-          opacity: 1
-        }).addTo(map);
-        
-        ${startEndMarkers}
-        ${markersJs}
-        
-        var bounds = L.latLngBounds(routeCoords);
-        map.fitBounds(bounds, { padding: [50, 50] });
+
+        if (routeCoords.length > 1) {
+          L.polyline(routeCoords, {
+            color: '#ff6b6b',
+            weight: 8,
+            opacity: 0.3
+          }).addTo(map);
+
+          L.polyline(routeCoords, {
+            color: '#ef4444',
+            weight: 4,
+            opacity: 1
+          }).addTo(map);
+
+          ${startEndMarkers}
+          ${markersJs}
+
+          var bounds = L.latLngBounds(routeCoords);
+          map.fitBounds(bounds, { padding: [50, 50] });
+        } else {
+          ${markersJs}
+        }
       </script>
     </body>
     </html>
@@ -277,7 +310,7 @@ export default function RouteScreen() {
       try {
         const data = JSON.parse(params.routeData as string);
         setRouteData(data);
-        
+
         if (data.has_severe_weather && Platform.OS !== 'web') {
           scheduleWeatherAlert(data);
         }
@@ -304,85 +337,91 @@ export default function RouteScreen() {
 
   const speakSummary = async () => {
     if (!routeData) return;
-    
+
     if (isSpeaking) {
       await Speech.stop();
       setIsSpeaking(false);
     } else {
       setIsSpeaking(true);
-      
+
       // Calculate alerts locally
       const allAlertsLocal = routeData.waypoints.flatMap((wp) => wp.alerts);
       const uniqueAlertsLocal = allAlertsLocal.filter(
         (alert, index, self) => index === self.findIndex((a) => a.id === alert.id)
       );
       const hasAlertsLocal = uniqueAlertsLocal.length > 0;
-      
+
       // Build comprehensive weather briefing
       const parts: string[] = [];
-      
+
       // Introduction
       parts.push(`Weather briefing for your trip from ${routeData.origin} to ${routeData.destination}.`);
-      
+
       // Duration and distance
       const totalDist = calculateTotalDistance(routeData.waypoints);
-      const duration = routeData.total_duration_minutes 
-        ? `${Math.floor(routeData.total_duration_minutes / 60)} hours and ${Math.round(routeData.total_duration_minutes % 60)} minutes`
+      const duration = routeData.total_duration_minutes
+        ? `${Math.floor(routeData.total_duration_minutes / 60)} hours and ${Math.round(
+            routeData.total_duration_minutes % 60
+          )} minutes`
         : `approximately ${Math.floor(totalDist / 55)} hours`;
       parts.push(`Total distance is ${Math.round(totalDist)} miles, taking ${duration}.`);
-      
+
       // Weather alerts warning
       if (hasAlertsLocal) {
-        parts.push(`Warning: There are ${uniqueAlertsLocal.length} weather alerts along your route. Please use caution.`);
+        parts.push(
+          `Warning: There are ${uniqueAlertsLocal.length} weather alerts along your route. Please use caution.`
+        );
       }
-      
+
       // Weather at each waypoint
       parts.push(`Here's the weather along your route:`);
-      
+
       routeData.waypoints.forEach((wp, index) => {
         if (wp.weather) {
-          const locationName = wp.waypoint.name || (index === 0 ? 'Starting point' : `Point ${index}`);
+          const locationName =
+            wp.waypoint.name || (index === 0 ? 'Starting point' : `Point ${index}`);
           const temp = wp.weather.temperature;
           const conditions = wp.weather.conditions || 'unknown conditions';
           const wind = wp.weather.wind_speed || 'calm winds';
-          
+
           let wpText = `${locationName}: ${temp} degrees, ${conditions}, with ${wind}.`;
-          
+
           // Add alert info for this waypoint
           if (wp.alerts.length > 0) {
             wpText += ` Alert: ${wp.alerts[0].event}.`;
           }
-          
+
           parts.push(wpText);
         }
       });
-      
+
       // Packing suggestions
       if (routeData.packing_suggestions && routeData.packing_suggestions.length > 0) {
         const essentialItems = routeData.packing_suggestions
-          .filter(p => p.priority === 'essential')
-          .map(p => p.item);
-        
+          .filter((p) => p.priority === 'essential')
+          .map((p) => p.item);
+
         if (essentialItems.length > 0) {
           parts.push(`Essential items to pack: ${essentialItems.join(', ')}.`);
         }
       }
-      
+
       // Sunrise/sunset
-      const sunTimesLocal = routeData.waypoints.find(wp => wp.weather?.sunrise)?.weather;
+      const sunTimesLocal = routeData.waypoints.find((wp) => wp.weather?.sunrise)?.weather;
       if (sunTimesLocal?.sunrise && sunTimesLocal?.sunset) {
         parts.push(`Sunrise is at ${sunTimesLocal.sunrise}, sunset at ${sunTimesLocal.sunset}.`);
       }
-      
+
       // AI Summary or closing
-      if (routeData.ai_summary && !routeData.ai_summary.includes('unavailable')) {
-        parts.push(routeData.ai_summary);
+      const spokenSummary = getDisplaySummary(routeData.ai_summary);
+      if (spokenSummary && !spokenSummary.toLowerCase().includes('no ai summary')) {
+        parts.push(spokenSummary);
       } else {
         parts.push('Drive safely and check conditions before departing.');
       }
-      
+
       const fullText = parts.join(' ');
-      
+
       Speech.speak(fullText, {
         language: 'en-US',
         pitch: 1.0,
@@ -395,14 +434,29 @@ export default function RouteScreen() {
 
   const shareRoute = async () => {
     if (!routeData) return;
-    
+
     const temps = routeData.waypoints
-      .filter(wp => wp.weather?.temperature)
-      .map(wp => `${wp.waypoint.name}: ${wp.weather?.temperature}°F ${wp.weather?.conditions}`)
+      .filter((wp) => wp.weather?.temperature !== null && wp.weather?.temperature !== undefined)
+      .map((wp, idx) => {
+        const nm = wp.waypoint.name || (idx === 0 ? 'Start' : idx === routeData.waypoints.length - 1 ? 'End' : `Point ${idx}`);
+        return `${nm}: ${wp.weather?.temperature}°${wp.weather?.temperature_unit ?? 'F'} ${wp.weather?.conditions ?? ''}`.trim();
+      })
       .join('\n');
-    
-    const message = `🚗 Routecast Weather Report\n\n📍 ${routeData.origin} → ${routeData.destination}\n⏱ ${routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : 'N/A'}\n\n🌤 Weather:\n${temps}\n\n${routeData.ai_summary || ''}`;
-    
+
+    const message = `🚗 Routecast Weather Report
+
+📍 ${routeData.origin} → ${routeData.destination}
+⏱ ${
+      routeData.total_duration_minutes
+        ? formatDuration(routeData.total_duration_minutes)
+        : 'N/A'
+    }
+
+🌤 Weather:
+${temps}
+
+${getDisplaySummary(routeData.ai_summary)}`;
+
     try {
       await Share.share({
         message,
@@ -433,7 +487,7 @@ export default function RouteScreen() {
   const mapHtml = generateMapHtml(routeData.route_geometry, routeData.waypoints, showAlertMarkers);
 
   // Get first waypoint with sunrise/sunset
-  const sunTimes = routeData.waypoints.find(wp => wp.weather?.sunrise)?.weather;
+  const sunTimes = routeData.waypoints.find((wp) => wp.weather?.sunrise)?.weather;
 
   return (
     <View style={styles.container}>
@@ -446,12 +500,7 @@ export default function RouteScreen() {
             title="Route Map"
           />
         ) : (
-          <WebView
-            style={styles.map}
-            source={{ html: mapHtml }}
-            scrollEnabled={false}
-            javaScriptEnabled={true}
-          />
+          <WebView style={styles.map} source={{ html: mapHtml }} scrollEnabled={false} javaScriptEnabled={true} />
         )}
       </View>
 
@@ -466,28 +515,20 @@ export default function RouteScreen() {
               {routeData.origin} → {routeData.destination}
             </Text>
             <Text style={styles.headerStats}>
-              {Math.round(totalDistance)} mi • {routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : formatDuration(totalDistance / 55 * 60)}
+              {Math.round(totalDistance)} mi •{' '}
+              {routeData.total_duration_minutes
+                ? formatDuration(routeData.total_duration_minutes)
+                : formatDuration((totalDistance / 55) * 60)}
             </Text>
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.markerToggle, !showAlertMarkers && styles.markerToggleOff]}
             onPress={() => setShowAlertMarkers(!showAlertMarkers)}
           >
-            <Ionicons 
-              name="warning" 
-              size={20} 
-              color={showAlertMarkers ? '#ef4444' : '#6b7280'} 
-            />
+            <Ionicons name="warning" size={20} color={showAlertMarkers ? '#ef4444' : '#6b7280'} />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.toggleButton}
-            onPress={() => setShowWeatherPanel(!showWeatherPanel)}
-          >
-            <Ionicons 
-              name={showWeatherPanel ? 'chevron-down' : 'chevron-up'} 
-              size={24} 
-              color="#fff" 
-            />
+          <TouchableOpacity style={styles.toggleButton} onPress={() => setShowWeatherPanel(!showWeatherPanel)}>
+            <Ionicons name={showWeatherPanel ? 'chevron-down' : 'chevron-up'} size={24} color="#fff" />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -496,9 +537,7 @@ export default function RouteScreen() {
       {hasAlerts && (
         <View style={styles.alertBanner}>
           <Ionicons name="warning" size={18} color="#fff" />
-          <Text style={styles.alertBannerText}>
-            Weather alerts detected along your route!
-          </Text>
+          <Text style={styles.alertBannerText}>Weather alerts detected along your route!</Text>
         </View>
       )}
 
@@ -508,14 +547,8 @@ export default function RouteScreen() {
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity style={styles.actionButton} onPress={speakSummary}>
-              <Ionicons 
-                name={isSpeaking ? "stop-circle" : "volume-high"} 
-                size={20} 
-                color="#60a5fa" 
-              />
-              <Text style={styles.actionButtonText}>
-                {isSpeaking ? 'Stop' : 'Listen'}
-              </Text>
+              <Ionicons name={isSpeaking ? 'stop-circle' : 'volume-high'} size={20} color="#60a5fa" />
+              <Text style={styles.actionButtonText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionButton} onPress={shareRoute}>
               <Ionicons name="share-outline" size={20} color="#60a5fa" />
@@ -537,42 +570,28 @@ export default function RouteScreen() {
 
           {/* Tabs */}
           <View style={styles.tabs}>
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'weather' && styles.tabActive]}
-              onPress={() => setActiveTab('weather')}
-            >
+            <TouchableOpacity style={[styles.tab, activeTab === 'weather' && styles.tabActive]} onPress={() => setActiveTab('weather')}>
               <Ionicons name="cloud" size={16} color={activeTab === 'weather' ? '#eab308' : '#6b7280'} />
               <Text style={[styles.tabText, activeTab === 'weather' && styles.tabTextActive]}>Weather</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'timeline' && styles.tabActive]}
-              onPress={() => setActiveTab('timeline')}
-            >
+            <TouchableOpacity style={[styles.tab, activeTab === 'timeline' && styles.tabActive]} onPress={() => setActiveTab('timeline')}>
               <Ionicons name="time" size={16} color={activeTab === 'timeline' ? '#eab308' : '#6b7280'} />
               <Text style={[styles.tabText, activeTab === 'timeline' && styles.tabTextActive]}>Timeline</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'packing' && styles.tabActive]}
-              onPress={() => setActiveTab('packing')}
-            >
+            <TouchableOpacity style={[styles.tab, activeTab === 'packing' && styles.tabActive]} onPress={() => setActiveTab('packing')}>
               <Ionicons name="bag" size={16} color={activeTab === 'packing' ? '#eab308' : '#6b7280'} />
               <Text style={[styles.tabText, activeTab === 'packing' && styles.tabTextActive]}>Packing</Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView 
-            style={styles.weatherScroll}
-            showsVerticalScrollIndicator={false}
-          >
+          <ScrollView style={styles.weatherScroll} showsVerticalScrollIndicator={false}>
             {activeTab === 'weather' && (
               <>
                 {/* Weather Summary Card */}
                 <View style={styles.summaryCard}>
                   <View style={styles.summaryHeader}>
                     <View style={styles.summaryTitleRow}>
-                      {hasAlerts && (
-                        <Ionicons name="warning" size={20} color="#ef4444" />
-                      )}
+                      {hasAlerts && <Ionicons name="warning" size={20} color="#ef4444" />}
                       <Text style={styles.summaryTitle}>AI Weather Summary</Text>
                     </View>
                   </View>
@@ -584,9 +603,8 @@ export default function RouteScreen() {
                     </View>
                   )}
 
-                  <Text style={styles.summaryText}>
-                    {routeData.ai_summary || 'Weather conditions are generally favorable along your route. Check individual waypoints for specific conditions.'}
-                  </Text>
+                  {/* ✅ FIXED: never show blank / placeholder */}
+                  <Text style={styles.summaryText}>{getDisplaySummary(routeData.ai_summary)}</Text>
                 </View>
 
                 {/* Waypoint Weather Cards */}
@@ -595,7 +613,12 @@ export default function RouteScreen() {
                     <View style={styles.waypointHeader}>
                       <View style={styles.waypointLabel}>
                         <Text style={styles.waypointName} numberOfLines={1}>
-                          {wp.waypoint.name || (index === 0 ? 'Start' : index === routeData.waypoints.length - 1 ? 'End' : `Point ${index}`)}
+                          {wp.waypoint.name ||
+                            (index === 0
+                              ? 'Start'
+                              : index === routeData.waypoints.length - 1
+                              ? 'End'
+                              : `Point ${index}`)}
                         </Text>
                         {wp.alerts.length > 0 && (
                           <View style={styles.alertBadge}>
@@ -605,9 +628,7 @@ export default function RouteScreen() {
                       </View>
                       <View style={styles.waypointMeta}>
                         {wp.waypoint.distance_from_start !== null && wp.waypoint.distance_from_start > 0 && (
-                          <Text style={styles.waypointDistance}>
-                            {Math.round(wp.waypoint.distance_from_start)} mi
-                          </Text>
+                          <Text style={styles.waypointDistance}>{Math.round(wp.waypoint.distance_from_start)} mi</Text>
                         )}
                         {wp.waypoint.arrival_time && (
                           <Text style={styles.waypointEta}>
@@ -620,25 +641,19 @@ export default function RouteScreen() {
                     {wp.weather ? (
                       <View style={styles.weatherContent}>
                         <View style={styles.tempSection}>
-                          <Ionicons 
-                            name={getWeatherIcon(wp.weather.conditions) as any} 
-                            size={36} 
-                            color="#eab308" 
-                          />
+                          <Ionicons name={getWeatherIcon(wp.weather.conditions) as any} size={36} color="#eab308" />
                           <Text style={styles.temperature}>
                             {wp.weather.temperature}°{wp.weather.temperature_unit}
                           </Text>
                         </View>
                         <Text style={styles.conditions}>{wp.weather.conditions || 'Unknown'}</Text>
-                        
+
                         <View style={styles.weatherDetails}>
                           <View style={styles.detailItem}>
                             <MaterialCommunityIcons name="weather-windy" size={18} color="#a1a1aa" />
-                            <Text style={styles.detailText}>
-                              {wp.weather.wind_speed || 'N/A'}
-                            </Text>
+                            <Text style={styles.detailText}>{wp.weather.wind_speed || 'N/A'}</Text>
                           </View>
-                          {wp.weather.humidity && (
+                          {wp.weather.humidity !== null && wp.weather.humidity !== undefined && (
                             <View style={styles.detailItem}>
                               <Ionicons name="water" size={18} color="#a1a1aa" />
                               <Text style={styles.detailText}>{wp.weather.humidity}%</Text>
@@ -679,11 +694,7 @@ export default function RouteScreen() {
                         {hour.time ? format(parseISO(hour.time), 'h a') : '--'}
                       </Text>
                       <View style={styles.timelineWeather}>
-                        <Ionicons 
-                          name={getWeatherIcon(hour.conditions) as any} 
-                          size={24} 
-                          color="#eab308" 
-                        />
+                        <Ionicons name={getWeatherIcon(hour.conditions) as any} size={24} color="#eab308" />
                         <Text style={styles.timelineTemp}>{hour.temperature}°</Text>
                       </View>
                       <Text style={styles.timelineConditions} numberOfLines={1}>
@@ -702,7 +713,7 @@ export default function RouteScreen() {
               <View style={styles.packingContainer}>
                 <Text style={styles.packingTitle}>Packing Suggestions</Text>
                 <Text style={styles.packingSubtitle}>Based on weather along your route</Text>
-                
+
                 {routeData.packing_suggestions && routeData.packing_suggestions.length > 0 ? (
                   routeData.packing_suggestions.map((item, index) => (
                     <View key={index} style={styles.packingItem}>
@@ -723,7 +734,7 @@ export default function RouteScreen() {
                 )}
               </View>
             )}
-            
+
             <View style={{ height: 40 }} />
           </ScrollView>
         </View>
@@ -1141,15 +1152,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 20,
   },
-  webMapPlaceholder: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  webMapText: {
-    color: '#52525b',
-    fontSize: 14,
-    marginTop: 12,
-  },
 });
+
