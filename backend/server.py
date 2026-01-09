@@ -64,6 +64,9 @@ class RouteRequest(BaseModel):
     destination: str
     departure_time: Optional[str] = None  # ISO format datetime
     stops: List[StopPoint] = Field(default_factory=list)
+    check_bridges: bool = False
+    vehicle_height: Optional[float] = None  # in feet or meters
+    vehicle_height_unit: str = "feet"  # "feet" or "meters"
 
 
 class Waypoint(BaseModel):
@@ -112,10 +115,38 @@ class PackingSuggestion(BaseModel):
     priority: str  # essential, recommended, optional
 
 
+class BridgeClearance(BaseModel):
+    name: Optional[str] = None
+    clearance_feet: float
+    clearance_meters: float
+    lat: float
+    lon: float
+    distance_from_start: Optional[float] = None
+    road_name: Optional[str] = None
+    warning_level: str = "caution"  # caution, warning, critical
+
+
+class DelayRiskScore(BaseModel):
+    overall_risk_percent: int  # 0-100
+    risk_level: str  # low, medium, high, critical
+    estimated_delay_minutes: int  # Estimated delay in minutes
+    risk_factors: List[str] = Field(default_factory=list)
+    confidence: str = "medium"  # low, medium, high
+
+
+class DriveWindowAdvice(BaseModel):
+    recommendation: str  # "depart_now", "depart_earlier", "depart_later", "postpone"
+    optimal_departure_time: Optional[str] = None  # ISO format
+    reason: str
+    time_shift_minutes: int = 0  # Positive = later, Negative = earlier
+    alternate_route_available: bool = False
+
+
 class WaypointWeather(BaseModel):
     waypoint: Waypoint
     weather: Optional[WeatherData] = None
     alerts: List[WeatherAlert] = Field(default_factory=list)
+    bridge_warnings: List[BridgeClearance] = Field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -130,6 +161,10 @@ class RouteWeatherResponse(BaseModel):
     waypoints: List[WaypointWeather] = Field(default_factory=list)
     ai_summary: Optional[str] = None
     has_severe_weather: bool = False
+    has_bridge_warnings: bool = False
+    bridge_clearances: List[BridgeClearance] = Field(default_factory=list)
+    delay_risk_score: Optional[DelayRiskScore] = None
+    drive_window_advice: Optional[DriveWindowAdvice] = None
     packing_suggestions: List[PackingSuggestion] = Field(default_factory=list)
     weather_timeline: List[HourlyForecast] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -641,6 +676,310 @@ Be concise and practical.
 """
 
 
+def calculate_delay_risk_score(waypoints_weather: List[WaypointWeather]) -> DelayRiskScore:
+    """
+    Calculate delay risk score based on weather conditions along the route.
+    """
+    risk_factors = []
+    total_risk_points = 0
+    max_risk_points = 0
+    
+    # Weight factors for different conditions
+    SEVERITY_WEIGHTS = {
+        "Extreme": 40,
+        "Severe": 30,
+        "Moderate": 15,
+        "Minor": 5
+    }
+    
+    for wp in waypoints_weather:
+        # Check for severe weather alerts
+        if wp.alerts:
+            for alert in wp.alerts:
+                severity = alert.severity
+                if severity in SEVERITY_WEIGHTS:
+                    points = SEVERITY_WEIGHTS[severity]
+                    total_risk_points += points
+                    max_risk_points += 40  # Max possible per waypoint
+                    
+                    if severity in ["Extreme", "Severe"]:
+                        risk_factors.append(f"{alert.event} - {severity}")
+        else:
+            max_risk_points += 40
+        
+        # Check weather conditions
+        if wp.weather:
+            weather = wp.weather
+            
+            # Heavy precipitation
+            if weather.conditions:
+                conditions_lower = weather.conditions.lower()
+                if any(term in conditions_lower for term in ["heavy rain", "heavy snow", "blizzard", "thunderstorm"]):
+                    total_risk_points += 20
+                    risk_factors.append(f"Heavy precipitation: {weather.conditions}")
+                elif any(term in conditions_lower for term in ["rain", "snow", "sleet", "ice"]):
+                    total_risk_points += 10
+                    risk_factors.append(f"Precipitation: {weather.conditions}")
+            
+            # High winds
+            if weather.wind_speed:
+                try:
+                    wind_str = str(weather.wind_speed).lower().replace("mph", "").replace("km/h", "").strip()
+                    wind_speed = float(wind_str.split()[0])
+                    if wind_speed > 40:
+                        total_risk_points += 15
+                        risk_factors.append(f"High winds: {weather.wind_speed}")
+                    elif wind_speed > 25:
+                        total_risk_points += 8
+                except (ValueError, IndexError):
+                    pass
+            
+            # Extreme temperatures
+            if weather.temperature is not None:
+                if weather.temperature <= 32:
+                    total_risk_points += 10
+                    risk_factors.append(f"Freezing conditions: {weather.temperature}°F")
+                elif weather.temperature >= 100:
+                    total_risk_points += 5
+                    risk_factors.append(f"Extreme heat: {weather.temperature}°F")
+            
+            max_risk_points += 50  # Max weather points per waypoint
+    
+    # Calculate percentage
+    if max_risk_points > 0:
+        risk_percent = min(100, int((total_risk_points / max_risk_points) * 100))
+    else:
+        risk_percent = 0
+    
+    # Determine risk level
+    if risk_percent < 20:
+        risk_level = "low"
+        estimated_delay = 0
+    elif risk_percent < 50:
+        risk_level = "medium"
+        estimated_delay = 15
+    elif risk_percent < 80:
+        risk_level = "high"
+        estimated_delay = 45
+    else:
+        risk_level = "critical"
+        estimated_delay = 120
+    
+    # Adjust estimated delay based on number of problem areas
+    num_risk_areas = len(risk_factors)
+    if num_risk_areas > 3:
+        estimated_delay = int(estimated_delay * 1.5)
+    
+    # Remove duplicate risk factors
+    risk_factors = list(dict.fromkeys(risk_factors))[:5]  # Limit to top 5
+    
+    confidence = "high" if len(waypoints_weather) >= 3 else "medium"
+    
+    return DelayRiskScore(
+        overall_risk_percent=risk_percent,
+        risk_level=risk_level,
+        estimated_delay_minutes=estimated_delay,
+        risk_factors=risk_factors,
+        confidence=confidence
+    )
+
+
+def calculate_drive_window_advice(
+    waypoints_weather: List[WaypointWeather],
+    delay_risk: DelayRiskScore,
+    departure_time: datetime
+) -> DriveWindowAdvice:
+    """
+    Provide advice on when to depart based on weather forecast.
+    """
+    # Analyze weather timeline to find optimal departure window
+    worst_weather_time = None
+    worst_risk_score = 0
+    
+    # Find peak bad weather
+    for wp in waypoints_weather:
+        if wp.alerts:
+            for alert in wp.alerts:
+                if alert.severity in ["Extreme", "Severe"]:
+                    # Weather is severe along route
+                    worst_weather_time = departure_time
+                    worst_risk_score = max(worst_risk_score, 80)
+    
+    # Decision logic
+    if delay_risk.risk_level == "critical":
+        # Suggest postponing
+        return DriveWindowAdvice(
+            recommendation="postpone",
+            optimal_departure_time=None,
+            reason="Critical weather conditions detected along your route. Consider postponing your trip or taking an alternate route.",
+            time_shift_minutes=0,
+            alternate_route_available=True
+        )
+    
+    elif delay_risk.risk_level == "high":
+        # Suggest leaving later to avoid peak conditions
+        optimal_time = departure_time + timedelta(hours=2)
+        return DriveWindowAdvice(
+            recommendation="depart_later",
+            optimal_departure_time=optimal_time.isoformat(),
+            reason=f"Severe weather expected along route. Consider departing 2 hours later to avoid peak conditions.",
+            time_shift_minutes=120,
+            alternate_route_available=True
+        )
+    
+    elif delay_risk.risk_level == "medium":
+        # Suggest leaving earlier if possible
+        if departure_time.hour > 6:  # Only suggest earlier if it's not too early
+            optimal_time = departure_time - timedelta(minutes=30)
+            return DriveWindowAdvice(
+                recommendation="depart_earlier",
+                optimal_departure_time=optimal_time.isoformat(),
+                reason="Moderate weather developing. Consider leaving 30 minutes earlier to stay ahead of conditions.",
+                time_shift_minutes=-30,
+                alternate_route_available=False
+            )
+        else:
+            return DriveWindowAdvice(
+                recommendation="depart_now",
+                optimal_departure_time=departure_time.isoformat(),
+                reason="Current departure time is optimal. Minor weather possible but manageable.",
+                time_shift_minutes=0,
+                alternate_route_available=False
+            )
+    
+    else:  # low risk
+        return DriveWindowAdvice(
+            recommendation="depart_now",
+            optimal_departure_time=departure_time.isoformat(),
+            reason="Weather conditions are favorable for your trip. Safe travels!",
+            time_shift_minutes=0,
+            alternate_route_available=False
+        )
+
+
+async def check_bridge_clearances(
+    route_coords: List[tuple],
+    vehicle_height_feet: float,
+    total_distance_miles: float
+) -> List[BridgeClearance]:
+    """
+    Check for low bridge clearances along the route using OpenStreetMap Overpass API.
+    """
+    try:
+        # Create a bounding box from route coordinates
+        lats = [coord[0] for coord in route_coords]
+        lons = [coord[1] for coord in route_coords]
+        
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        
+        # Add buffer (approximately 0.5 miles in degrees)
+        buffer = 0.01
+        bbox = f"{min_lat - buffer},{min_lon - buffer},{max_lat + buffer},{max_lon + buffer}"
+        
+        # Query Overpass API for bridges with maxheight tags
+        overpass_url = "https://overpass-api.de/api/interpreter"
+        query = f"""
+        [out:json][timeout:25];
+        (
+          way["bridge"]["maxheight"]({bbox});
+          way["highway"]["maxheight"]["bridge"]({bbox});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(overpass_url, data={"data": query})
+            
+            if response.status_code != 200:
+                logger.warning(f"Overpass API returned status {response.status_code}")
+                return []
+            
+            data = response.json()
+            elements = data.get("elements", [])
+            
+            bridges = []
+            nodes_map = {}
+            
+            # Build node map
+            for elem in elements:
+                if elem.get("type") == "node":
+                    nodes_map[elem["id"]] = (elem["lat"], elem["lon"])
+            
+            # Process ways (bridges)
+            for elem in elements:
+                if elem.get("type") == "way" and "maxheight" in elem.get("tags", {}):
+                    maxheight_str = elem["tags"]["maxheight"]
+                    
+                    # Parse height (could be in feet or meters)
+                    try:
+                        # Remove units and convert
+                        maxheight_str = maxheight_str.replace("'", "").replace('"', "").replace("ft", "").replace("m", "").strip()
+                        
+                        # Check if it's feet or meters
+                        if "'" in elem["tags"]["maxheight"] or "ft" in elem["tags"]["maxheight"].lower():
+                            clearance_feet = float(maxheight_str)
+                        else:
+                            # Assume meters
+                            clearance_meters = float(maxheight_str)
+                            clearance_feet = clearance_meters * 3.28084
+                        
+                        clearance_meters = clearance_feet / 3.28084
+                        
+                        # Only include if it's lower than vehicle height
+                        if clearance_feet <= vehicle_height_feet + 1.0:  # 1 foot buffer
+                            # Get center point of the bridge
+                            node_ids = elem.get("nodes", [])
+                            if node_ids:
+                                bridge_coords = [nodes_map[nid] for nid in node_ids if nid in nodes_map]
+                                if bridge_coords:
+                                    center_lat = sum(c[0] for c in bridge_coords) / len(bridge_coords)
+                                    center_lon = sum(c[1] for c in bridge_coords) / len(bridge_coords)
+                                    
+                                    # Calculate distance from start
+                                    distance_from_start = 0
+                                    for i, (lat, lon) in enumerate(route_coords):
+                                        if i > 0:
+                                            distance_from_start += haversine_distance(
+                                                route_coords[i-1][0], route_coords[i-1][1],
+                                                lat, lon
+                                            )
+                                        
+                                        # Check if this bridge is near this route point
+                                        dist_to_bridge = haversine_distance(lat, lon, center_lat, center_lon)
+                                        if dist_to_bridge < 0.5:  # Within 0.5 miles
+                                            warning_level = "caution"
+                                            if clearance_feet < vehicle_height_feet:
+                                                warning_level = "critical"
+                                            elif clearance_feet < vehicle_height_feet + 0.5:
+                                                warning_level = "warning"
+                                            
+                                            bridges.append(BridgeClearance(
+                                                name=elem["tags"].get("name", f"Bridge at mile {int(distance_from_start)}"),
+                                                clearance_feet=round(clearance_feet, 1),
+                                                clearance_meters=round(clearance_meters, 2),
+                                                lat=center_lat,
+                                                lon=center_lon,
+                                                distance_from_start=round(distance_from_start, 1),
+                                                road_name=elem["tags"].get("highway", "Unknown"),
+                                                warning_level=warning_level
+                                            ))
+                                            break
+                    except (ValueError, KeyError) as e:
+                        logger.debug(f"Could not parse bridge height: {maxheight_str}, error: {e}")
+                        continue
+            
+            # Sort by distance from start
+            bridges.sort(key=lambda b: b.distance_from_start or 0)
+            return bridges
+            
+    except Exception as e:
+        logger.error(f"Error checking bridge clearances: {e}")
+        return []
+
+
 # ==================== API Routes ====================
 
 @api_router.get("/")
@@ -740,6 +1079,39 @@ async def get_route_weather(request: RouteRequest):
     packing_suggestions = generate_packing_suggestions(list(waypoints_weather))
     weather_timeline = build_weather_timeline(list(waypoints_weather))
 
+    # Check for bridge clearances if requested
+    bridge_clearances = []
+    has_bridge_warnings = False
+    if request.check_bridges and request.vehicle_height:
+        vehicle_height_feet = request.vehicle_height
+        if request.vehicle_height_unit == "meters":
+            vehicle_height_feet = request.vehicle_height * 3.28084
+        
+        # Decode route geometry to get coordinates
+        route_coords = polyline.decode(route_geometry)
+        total_distance = sum(
+            haversine_distance(route_coords[i][0], route_coords[i][1], 
+                             route_coords[i+1][0], route_coords[i+1][1])
+            for i in range(len(route_coords) - 1)
+        )
+        
+        bridge_clearances = await check_bridge_clearances(
+            route_coords,
+            vehicle_height_feet,
+            total_distance
+        )
+        has_bridge_warnings = len(bridge_clearances) > 0
+
+    # Calculate delay risk score (PREMIUM FEATURE)
+    delay_risk = calculate_delay_risk_score(list(waypoints_weather))
+    
+    # Calculate drive window advice (PREMIUM FEATURE)
+    drive_window = calculate_drive_window_advice(
+        list(waypoints_weather),
+        delay_risk,
+        departure_time
+    )
+
     prompt = build_ai_prompt(
         waypoints_weather=list(waypoints_weather),
         origin=request.origin,
@@ -758,6 +1130,10 @@ async def get_route_weather(request: RouteRequest):
         waypoints=list(waypoints_weather),
         ai_summary=ai_summary,
         has_severe_weather=has_severe,
+        has_bridge_warnings=has_bridge_warnings,
+        bridge_clearances=bridge_clearances,
+        delay_risk_score=delay_risk,
+        drive_window_advice=drive_window,
         packing_suggestions=packing_suggestions,
         weather_timeline=weather_timeline,
     )

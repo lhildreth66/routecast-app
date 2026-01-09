@@ -1,1156 +1,837 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Dimensions,
   ActivityIndicator,
-  Platform,
-  Share,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { WebView } from 'react-native-webview';
-import * as Notifications from 'expo-notifications';
-import * as Speech from 'expo-speech';
-import { format, parseISO } from 'date-fns';
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Pressable,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useLocalSearchParams, router, useFocusEffect } from "expo-router";
+import axios from "axios";
+import { getPremiumStatus } from "../utils/premium";
 
-const { width, height } = Dimensions.get('window');
+// Final, corrected version of the results screen (`route.tsx`)
 
-interface HourlyForecast {
-  time: string;
-  temperature: number;
-  conditions: string;
-  wind_speed: string;
-  precipitation_chance?: number;
-}
+type StopPoint = { location: string; type: "stop" };
 
-interface WeatherData {
-  temperature: number | null;
-  temperature_unit: string;
-  wind_speed: string | null;
-  wind_direction: string | null;
-  conditions: string | null;
-  icon: string | null;
-  humidity: number | null;
-  is_daytime: boolean;
-  sunrise?: string;
-  sunset?: string;
-  hourly_forecast?: HourlyForecast[];
-}
-
-interface WeatherAlert {
-  id: string;
-  headline: string;
-  severity: string;
-  event: string;
-  description: string;
-  areas: string | null;
-}
-
-interface Waypoint {
-  lat: number;
-  lon: number;
-  name: string | null;
-  distance_from_start: number | null;
-  eta_minutes?: number;
-  arrival_time?: string;
-}
-
-interface WaypointWeather {
-  waypoint: Waypoint;
-  weather: WeatherData | null;
-  alerts: WeatherAlert[];
-  error: string | null;
-}
-
-interface PackingSuggestion {
-  item: string;
-  reason: string;
-  priority: string;
-}
-
-interface StopPoint {
-  location: string;
-  type: string;
-}
-
-interface RouteData {
-  id: string;
+type RouteWeatherRequest = {
   origin: string;
   destination: string;
-  stops?: StopPoint[];
   departure_time?: string;
-  total_duration_minutes?: number;
-  route_geometry: string;
-  waypoints: WaypointWeather[];
-  ai_summary: string | null;
-  has_severe_weather: boolean;
-  packing_suggestions?: PackingSuggestion[];
-  weather_timeline?: HourlyForecast[];
-  created_at: string;
-}
+  stops?: StopPoint[];
+  check_bridges?: boolean;
+  vehicle_height?: number;
+  vehicle_height_unit?: string;
+};
 
-// Decode polyline utility
-function decodePolyline(encoded: string): [number, number][] {
-  if (!encoded || typeof encoded !== 'string') return [];
-  const points: [number, number][] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    let shift = 0;
-    let result = 0;
-    let byte;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
-    lat += dlat;
-
-    shift = 0;
-    result = 0;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
-    lng += dlng;
-
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-
-  return points;
-}
-
-function getWeatherIcon(conditions: string | null): string {
-  if (!conditions) return 'cloud-outline';
-  const c = conditions.toLowerCase();
-
-  if (c.includes('thunder') || c.includes('storm')) return 'thunderstorm';
-  if (c.includes('rain') || c.includes('shower')) return 'rainy';
-  if (c.includes('snow') || c.includes('flurr')) return 'snow';
-  if (c.includes('cloud') || c.includes('overcast')) return 'cloudy';
-  if (c.includes('fog') || c.includes('mist') || c.includes('haze')) return 'cloudy';
-  if (c.includes('wind')) return 'flag';
-  if (c.includes('clear') || c.includes('sunny') || c.includes('fair')) return 'sunny';
-  return 'partly-sunny';
-}
-
-function calculateTotalDistance(waypoints: WaypointWeather[]): number {
-  if (!waypoints || waypoints.length === 0) return 0;
-  const last = waypoints[waypoints.length - 1];
-  return last?.waypoint?.distance_from_start || 0;
-}
-
-function formatDuration(minutes: number): string {
-  const safe = Number.isFinite(minutes) ? minutes : 0;
-  const hours = Math.floor(safe / 60);
-  const mins = Math.round(safe % 60);
-  return `${hours}h ${mins}m`;
-}
-
-function getPriorityColor(priority: string): string {
-  switch (priority) {
-    case 'essential':
-      return '#ef4444';
-    case 'recommended':
-      return '#f59e0b';
-    case 'optional':
-      return '#22c55e';
-    default:
-      return '#6b7280';
-  }
-}
-
-// ✅ Normalize AI summary so UI never shows blanks / "unavailable" placeholders
-function getDisplaySummary(ai_summary: string | null | undefined): string {
-  const s = (ai_summary ?? '').trim();
-  if (!s) return 'No AI summary available for this route.';
-  const lower = s.toLowerCase();
-  if (lower.includes('unavailable')) return 'No AI summary available for this route.';
+function normalizeApiRoot(raw: string) {
+  let s = (raw || "").trim();
+  if (!s) return "http://10.0.2.2:8000/api";
+  while (s.endsWith("/")) s = s.slice(0, -1);
+  if (!s.toLowerCase().endsWith("/api")) s = `${s}/api`;
   return s;
 }
 
-// Generate HTML for WebView map
-function generateMapHtml(
-  routeGeometry: string,
-  waypoints: WaypointWeather[],
-  showAlertMarkers: boolean = true
-): string {
-  const routeCoords = decodePolyline(routeGeometry);
-  // Fallback center if polyline is empty
-  const center = routeCoords.length
-    ? routeCoords[Math.floor(routeCoords.length / 2)]
-    : [39.5, -98.35]; // center-ish of US
+export default function RouteWeatherScreen() {
+  const params = useLocalSearchParams<{
+    origin?: string;
+    destination?: string;
+    stops?: string;
+    departure?: string;
+    checkBridges?: string;
+    vehicleHeight?: string;
+    vehicleHeightUnit?: string;
+  }>();
 
-  const alertWaypoints = (waypoints || []).filter((wp) => (wp.alerts || []).length > 0);
+  const origin = (params.origin || "").toString();
+  const destination = (params.destination || "").toString();
+  const checkBridges = (params.checkBridges || "").toString() === "1";
+  const vehicleHeight = (params.vehicleHeight || "").toString();
+  const vehicleHeightUnit = (params.vehicleHeightUnit || "feet").toString();
 
-  const markersJs =
-    showAlertMarkers && alertWaypoints.length > 0
-      ? alertWaypoints
-          .map((wp) => {
-            return `
-      (function() {
-        var icon = L.divIcon({
-          className: '',
-          html: '<div style="width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:22px solid #dc2626;position:relative;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));"><span style="position:absolute;top:6px;left:-4px;color:#fff;font-size:14px;font-weight:bold;">!</span></div>',
-          iconSize: [24, 22],
-          iconAnchor: [12, 22]
-        });
-        L.marker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {icon: icon}).addTo(map);
-      })();
-    `;
-          })
-          .join('\n')
-      : '';
+  const stops: StopPoint[] = useMemo(() => {
+    try {
+      const raw = (params.stops || "").toString();
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((s: any) => ({
+          location: String(s?.location || ""),
+          type: "stop" as const,
+        }))
+        .filter((s) => s.location.trim().length > 0);
+    } catch {
+      return [];
+    }
+  }, [params.stops]);
 
-  const startEndMarkers =
-    routeCoords.length >= 2
-      ? `
-    (function() {
-      var startIcon = L.divIcon({
-        className: '',
-        html: '<div style="background:#22c55e;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.4);"></div>',
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      });
-      L.marker([${routeCoords[0][0]}, ${routeCoords[0][1]}], {icon: startIcon}).addTo(map);
-    })();
+  const departure = (params.departure || "").toString();
+  const API_ROOT = useMemo(() => {
+    const env =
+      process.env.EXPO_PUBLIC_API_URL ||
+      process.env.EXPO_PUBLIC_BACKEND_URL ||
+      "http://10.0.2.2:8000/api";
+    return normalizeApiRoot(env);
+  }, []);
 
-    (function() {
-      var endIcon = L.divIcon({
-        className: '',
-        html: '<div style="background:#ef4444;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.4);"></div>',
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      });
-      L.marker([${routeCoords[routeCoords.length - 1][0]}, ${routeCoords[routeCoords.length - 1][1]}], {icon: endIcon}).addTo(map);
-    })();
-  `
-      : '';
+  const hitUrl = useMemo(() => `${API_ROOT}/route/weather`, [API_ROOT]);
 
-  const routeCoordsJs = routeCoords.map((c) => `[${c[0]}, ${c[1]}]`).join(',');
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body, #map { width: 100%; height: 100%; background: #1a1a1a; }
-        .leaflet-div-icon { background: transparent !important; border: none !important; }
-      </style>
-    </head>
-    <body>
-      <div id="map"></div>
-      <script>
-        var map = L.map('map', {
-          zoomControl: false,
-          attributionControl: false
-        }).setView([${center[0]}, ${center[1]}], 6);
-
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19
-        }).addTo(map);
-
-        var routeCoords = [${routeCoordsJs}];
-
-        if (routeCoords.length > 1) {
-          L.polyline(routeCoords, {
-            color: '#ff6b6b',
-            weight: 8,
-            opacity: 0.3
-          }).addTo(map);
-
-          L.polyline(routeCoords, {
-            color: '#ef4444',
-            weight: 4,
-            opacity: 1
-          }).addTo(map);
-
-          ${startEndMarkers}
-          ${markersJs}
-
-          var bounds = L.latLngBounds(routeCoords);
-          map.fitBounds(bounds, { padding: [50, 50] });
-        } else {
-          ${markersJs}
-        }
-      </script>
-    </body>
-    </html>
-  `;
-}
-
-export default function RouteScreen() {
-  const params = useLocalSearchParams();
-  const [routeData, setRouteData] = useState<RouteData | null>(null);
-  const [showWeatherPanel, setShowWeatherPanel] = useState(true);
-  const [showAlertMarkers, setShowAlertMarkers] = useState(true);
-  const [activeTab, setActiveTab] = useState<'weather' | 'timeline' | 'packing'>('weather');
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+  const [weatherData, setWeatherData] = useState<any>(null);
+  const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
-    if (params.routeData) {
-      try {
-        const data = JSON.parse(params.routeData as string);
-        setRouteData(data);
+    getPremiumStatus().then(status => setIsPremium(status.isPremium));
+  }, []);
 
-        if (data.has_severe_weather && Platform.OS !== 'web') {
-          scheduleWeatherAlert(data);
-        }
-      } catch (e) {
-        console.error('Error parsing route data:', e);
-      }
-    }
-  }, [params.routeData]);
+  const fetchRouteWeather = useCallback(async () => {
+    setErrorMsg("");
+    setWeatherData(null);
 
-  const scheduleWeatherAlert = async (data: RouteData) => {
+    const body: RouteWeatherRequest = {
+      origin,
+      destination,
+      departure_time: departure || undefined,
+      stops: stops.length ? stops : undefined,
+      check_bridges: checkBridges,
+      vehicle_height: checkBridges && vehicleHeight ? parseFloat(vehicleHeight) : undefined,
+      vehicle_height_unit: vehicleHeightUnit,
+    };
+
     try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Weather Alert on Your Route',
-          body: `Weather alerts detected between ${data.origin} and ${data.destination}. Check the app for details.`,
-          data: { routeId: data.id },
-        },
-        trigger: null,
-      });
-    } catch (e) {
-      console.error('Error scheduling notification:', e);
-    }
-  };
-
-  const speakSummary = async () => {
-    if (!routeData) return;
-
-    if (isSpeaking) {
-      await Speech.stop();
-      setIsSpeaking(false);
-    } else {
-      setIsSpeaking(true);
-
-      // Calculate alerts locally
-      const allAlertsLocal = routeData.waypoints.flatMap((wp) => wp.alerts);
-      const uniqueAlertsLocal = allAlertsLocal.filter(
-        (alert, index, self) => index === self.findIndex((a) => a.id === alert.id)
-      );
-      const hasAlertsLocal = uniqueAlertsLocal.length > 0;
-
-      // Build comprehensive weather briefing
-      const parts: string[] = [];
-
-      // Introduction
-      parts.push(`Weather briefing for your trip from ${routeData.origin} to ${routeData.destination}.`);
-
-      // Duration and distance
-      const totalDist = calculateTotalDistance(routeData.waypoints);
-      const duration = routeData.total_duration_minutes
-        ? `${Math.floor(routeData.total_duration_minutes / 60)} hours and ${Math.round(
-            routeData.total_duration_minutes % 60
-          )} minutes`
-        : `approximately ${Math.floor(totalDist / 55)} hours`;
-      parts.push(`Total distance is ${Math.round(totalDist)} miles, taking ${duration}.`);
-
-      // Weather alerts warning
-      if (hasAlertsLocal) {
-        parts.push(
-          `Warning: There are ${uniqueAlertsLocal.length} weather alerts along your route. Please use caution.`
-        );
-      }
-
-      // Weather at each waypoint
-      parts.push(`Here's the weather along your route:`);
-
-      routeData.waypoints.forEach((wp, index) => {
-        if (wp.weather) {
-          const locationName =
-            wp.waypoint.name || (index === 0 ? 'Starting point' : `Point ${index}`);
-          const temp = wp.weather.temperature;
-          const conditions = wp.weather.conditions || 'unknown conditions';
-          const wind = wp.weather.wind_speed || 'calm winds';
-
-          let wpText = `${locationName}: ${temp} degrees, ${conditions}, with ${wind}.`;
-
-          // Add alert info for this waypoint
-          if (wp.alerts.length > 0) {
-            wpText += ` Alert: ${wp.alerts[0].event}.`;
-          }
-
-          parts.push(wpText);
-        }
+      setLoading(true);
+      console.log(`[RouteWeather] Fetching from: ${hitUrl}`);
+      console.log(`[RouteWeather] Request body:`, body);
+      
+      const res = await axios.post(hitUrl, body, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 30000,
       });
 
-      // Packing suggestions
-      if (routeData.packing_suggestions && routeData.packing_suggestions.length > 0) {
-        const essentialItems = routeData.packing_suggestions
-          .filter((p) => p.priority === 'essential')
-          .map((p) => p.item);
-
-        if (essentialItems.length > 0) {
-          parts.push(`Essential items to pack: ${essentialItems.join(', ')}.`);
-        }
-      }
-
-      // Sunrise/sunset
-      const sunTimesLocal = routeData.waypoints.find((wp) => wp.weather?.sunrise)?.weather;
-      if (sunTimesLocal?.sunrise && sunTimesLocal?.sunset) {
-        parts.push(`Sunrise is at ${sunTimesLocal.sunrise}, sunset at ${sunTimesLocal.sunset}.`);
-      }
-
-      // AI Summary or closing
-      const spokenSummary = getDisplaySummary(routeData.ai_summary);
-      if (spokenSummary && !spokenSummary.toLowerCase().includes('no ai summary')) {
-        parts.push(spokenSummary);
+      console.log(`[RouteWeather] Response status: ${res.status}`);
+      
+      if (res.status >= 200 && res.status < 300) {
+        console.log(`[RouteWeather] Success! Data received`);
+        setWeatherData(res.data);
       } else {
-        parts.push('Drive safely and check conditions before departing.');
+        console.error(`[RouteWeather] Unexpected status: ${res.status}`);
+        setErrorMsg(`Received unexpected status: ${res.status}`);
       }
-
-      const fullText = parts.join(' ');
-
-      Speech.speak(fullText, {
-        language: 'en-US',
-        pitch: 1.0,
-        rate: 0.9, // Slightly slower for clarity
-        onDone: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail =
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message ||
+        "Request failed";
+      
+      console.error(`[RouteWeather] Error:`, {
+        status,
+        detail,
+        url: hitUrl,
+        error: err
       });
+      
+      setErrorMsg(`(${status || "?"}) ${detail}`);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [origin, destination, stops, departure, hitUrl]);
 
-  const shareRoute = async () => {
-    if (!routeData) return;
-
-    const temps = routeData.waypoints
-      .filter((wp) => wp.weather?.temperature !== null && wp.weather?.temperature !== undefined)
-      .map((wp, idx) => {
-        const nm = wp.waypoint.name || (idx === 0 ? 'Start' : idx === routeData.waypoints.length - 1 ? 'End' : `Point ${idx}`);
-        return `${nm}: ${wp.weather?.temperature}°${wp.weather?.temperature_unit ?? 'F'} ${wp.weather?.conditions ?? ''}`.trim();
-      })
-      .join('\n');
-
-    const message = `🚗 Routecast Weather Report
-
-📍 ${routeData.origin} → ${routeData.destination}
-⏱ ${
-      routeData.total_duration_minutes
-        ? formatDuration(routeData.total_duration_minutes)
-        : 'N/A'
-    }
-
-🌤 Weather:
-${temps}
-
-${getDisplaySummary(routeData.ai_summary)}`;
-
-    try {
-      await Share.share({
-        message,
-        title: 'Routecast Weather Report',
-      });
-    } catch (e) {
-      console.error('Error sharing:', e);
-    }
-  };
-
-  if (!routeData) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#eab308" />
-          <Text style={styles.loadingText}>Loading route data...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const allAlerts = routeData.waypoints.flatMap((wp) => wp.alerts);
-  const uniqueAlerts = allAlerts.filter(
-    (alert, index, self) => index === self.findIndex((a) => a.id === alert.id)
+  useFocusEffect(
+    useCallback(() => {
+      if (origin.trim() && destination.trim()) {
+        fetchRouteWeather();
+      }
+    }, [origin, destination, fetchRouteWeather])
   );
-  const totalDistance = calculateTotalDistance(routeData.waypoints);
-  const hasAlerts = uniqueAlerts.length > 0;
-  const mapHtml = generateMapHtml(routeData.route_geometry, routeData.waypoints, showAlertMarkers);
-
-  // Get first waypoint with sunrise/sunset
-  const sunTimes = routeData.waypoints.find((wp) => wp.weather?.sunrise)?.weather;
 
   return (
-    <View style={styles.container}>
-      {/* Map */}
-      <View style={styles.mapContainer}>
-        {Platform.OS === 'web' ? (
-          <iframe
-            srcDoc={mapHtml}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-            title="Route Map"
-          />
-        ) : (
-          <WebView style={styles.map} source={{ html: mapHtml }} scrollEnabled={false} javaScriptEnabled={true} />
-        )}
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.headerRow}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backText}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Route Weather</Text>
+        <View style={{ width: 50 }} />
       </View>
 
-      {/* Header */}
-      <SafeAreaView style={styles.headerSafe} edges={['top']}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerRoute} numberOfLines={1}>
-              {routeData.origin} → {routeData.destination}
-            </Text>
-            <Text style={styles.headerStats}>
-              {Math.round(totalDistance)} mi •{' '}
-              {routeData.total_duration_minutes
-                ? formatDuration(routeData.total_duration_minutes)
-                : formatDuration((totalDistance / 55) * 60)}
-            </Text>
-          </View>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.card}>
+          <Text style={styles.label}>Route</Text>
+          <Text style={styles.routeText}>
+            {origin || "?"} → {destination || "?"}
+          </Text>
+
+          {!!stops.length && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.label}>Stops</Text>
+              {stops.map((s, i) => (
+                <Text key={`${s.location}-${i}`} style={styles.subText}>
+                  • {s.location}
+                </Text>
+              ))}
+            </View>
+          )}
+
           <TouchableOpacity
-            style={[styles.markerToggle, !showAlertMarkers && styles.markerToggleOff]}
-            onPress={() => setShowAlertMarkers(!showAlertMarkers)}
+            style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
+            onPress={fetchRouteWeather}
+            disabled={loading}
           >
-            <Ionicons name="warning" size={20} color={showAlertMarkers ? '#ef4444' : '#6b7280'} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.toggleButton} onPress={() => setShowWeatherPanel(!showWeatherPanel)}>
-            <Ionicons name={showWeatherPanel ? 'chevron-down' : 'chevron-up'} size={24} color="#fff" />
+            <Text style={styles.primaryBtnText}>
+              {loading ? "Loading..." : "Refresh"}
+            </Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
 
-      {/* Alert Banner */}
-      {hasAlerts && (
-        <View style={styles.alertBanner}>
-          <Ionicons name="warning" size={18} color="#fff" />
-          <Text style={styles.alertBannerText}>Weather alerts detected along your route!</Text>
-        </View>
-      )}
-
-      {/* Weather Panel */}
-      {showWeatherPanel && (
-        <View style={styles.weatherPanel}>
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.actionButton} onPress={speakSummary}>
-              <Ionicons name={isSpeaking ? 'stop-circle' : 'volume-high'} size={20} color="#60a5fa" />
-              <Text style={styles.actionButtonText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={shareRoute}>
-              <Ionicons name="share-outline" size={20} color="#60a5fa" />
-              <Text style={styles.actionButtonText}>Share</Text>
-            </TouchableOpacity>
-            {sunTimes && (
-              <View style={styles.sunTimes}>
-                <View style={styles.sunTimeItem}>
-                  <Ionicons name="sunny" size={14} color="#f59e0b" />
-                  <Text style={styles.sunTimeText}>{sunTimes.sunrise}</Text>
-                </View>
-                <View style={styles.sunTimeItem}>
-                  <Ionicons name="moon" size={14} color="#8b5cf6" />
-                  <Text style={styles.sunTimeText}>{sunTimes.sunset}</Text>
-                </View>
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator />
+            <Text style={styles.subText}>Fetching route weather…</Text>
+          </View>
+        ) : errorMsg ? (
+          <View style={styles.card}>
+            <Text style={styles.errorTitle}>Couldn't load route weather</Text>
+            <Text style={styles.errorText}>{errorMsg}</Text>
+          </View>
+        ) : weatherData ? (
+          <>
+            {/* AI Summary */}
+            {weatherData.ai_summary && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>🤖 AI Trip Summary</Text>
+                <Text style={styles.aiText}>{weatherData.ai_summary}</Text>
               </View>
             )}
-          </View>
 
-          {/* Tabs */}
-          <View style={styles.tabs}>
-            <TouchableOpacity style={[styles.tab, activeTab === 'weather' && styles.tabActive]} onPress={() => setActiveTab('weather')}>
-              <Ionicons name="cloud" size={16} color={activeTab === 'weather' ? '#eab308' : '#6b7280'} />
-              <Text style={[styles.tabText, activeTab === 'weather' && styles.tabTextActive]}>Weather</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, activeTab === 'timeline' && styles.tabActive]} onPress={() => setActiveTab('timeline')}>
-              <Ionicons name="time" size={16} color={activeTab === 'timeline' ? '#eab308' : '#6b7280'} />
-              <Text style={[styles.tabText, activeTab === 'timeline' && styles.tabTextActive]}>Timeline</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, activeTab === 'packing' && styles.tabActive]} onPress={() => setActiveTab('packing')}>
-              <Ionicons name="bag" size={16} color={activeTab === 'packing' ? '#eab308' : '#6b7280'} />
-              <Text style={[styles.tabText, activeTab === 'packing' && styles.tabTextActive]}>Packing</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.weatherScroll} showsVerticalScrollIndicator={false}>
-            {activeTab === 'weather' && (
-              <>
-                {/* Weather Summary Card */}
-                <View style={styles.summaryCard}>
-                  <View style={styles.summaryHeader}>
-                    <View style={styles.summaryTitleRow}>
-                      {hasAlerts && <Ionicons name="warning" size={20} color="#ef4444" />}
-                      <Text style={styles.summaryTitle}>AI Weather Summary</Text>
-                    </View>
+            {/* Delay Risk Score - PREMIUM */}
+            {weatherData.delay_risk_score && (
+              isPremium ? (
+                <View style={[
+                  styles.card,
+                  styles.riskCard,
+                  weatherData.delay_risk_score.risk_level === 'critical' && styles.riskCardCritical,
+                  weatherData.delay_risk_score.risk_level === 'high' && styles.riskCardHigh,
+                  weatherData.delay_risk_score.risk_level === 'medium' && styles.riskCardMedium,
+                ]}>
+                  <Text style={styles.sectionTitle}>🎯 Delay Risk Score</Text>
+                  <View style={styles.riskScoreContainer}>
+                    <Text style={styles.riskPercent}>{weatherData.delay_risk_score.overall_risk_percent}%</Text>
+                    <Text style={styles.riskLevel}>
+                      {weatherData.delay_risk_score.risk_level.toUpperCase()} RISK
+                    </Text>
                   </View>
+                  {weatherData.delay_risk_score.estimated_delay_minutes > 0 && (
+                    <Text style={styles.riskDelay}>
+                      ⏱️ Estimated delay: {weatherData.delay_risk_score.estimated_delay_minutes} minutes
+                    </Text>
+                  )}
+                  {weatherData.delay_risk_score.risk_factors.length > 0 && (
+                    <View style={styles.riskFactors}>
+                      <Text style={styles.riskFactorsTitle}>Risk Factors:</Text>
+                      {weatherData.delay_risk_score.risk_factors.map((factor: string, idx: number) => (
+                        <Text key={idx} style={styles.riskFactor}>• {factor}</Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Pressable style={styles.premiumCard} onPress={() => router.push("/premium")}>
+                  <Text style={styles.premiumIcon}>🔒</Text>
+                  <Text style={styles.premiumTitle}>Delay Risk Score</Text>
+                  <Text style={styles.premiumDescription}>
+                    Get AI-powered delay predictions based on weather conditions
+                  </Text>
+                  <View style={styles.premiumBtn}>
+                    <Text style={styles.premiumBtnText}>Unlock with Pro</Text>
+                  </View>
+                </Pressable>
+              )
+            )}
 
-                  {hasAlerts && (
-                    <View style={styles.alertsDetectedBanner}>
-                      <Ionicons name="warning" size={16} color="#fff" />
-                      <Text style={styles.alertsDetectedText}>Weather Alerts Detected</Text>
+            {/* Drive Window Advisor - PREMIUM */}
+            {weatherData.drive_window_advice && (
+              isPremium ? (
+                <View style={[
+                  styles.card,
+                  styles.driveWindowCard,
+                  weatherData.drive_window_advice.recommendation === 'postpone' && styles.driveWindowCardCritical,
+                ]}>
+                  <Text style={styles.sectionTitle}>⏰ Drive Window Advisor</Text>
+                  <Text style={styles.driveWindowReason}>{weatherData.drive_window_advice.reason}</Text>
+                  
+                  {weatherData.drive_window_advice.optimal_departure_time && (
+                    <View style={styles.driveWindowTime}>
+                      <Text style={styles.driveWindowTimeLabel}>Recommended departure:</Text>
+                      <Text style={styles.driveWindowTimeValue}>
+                        {new Date(weatherData.drive_window_advice.optimal_departure_time).toLocaleString()}
+                      </Text>
                     </View>
                   )}
 
-                  {/* ✅ FIXED: never show blank / placeholder */}
-                  <Text style={styles.summaryText}>{getDisplaySummary(routeData.ai_summary)}</Text>
+                  {weatherData.drive_window_advice.time_shift_minutes !== 0 && (
+                    <Text style={styles.driveWindowShift}>
+                      {weatherData.drive_window_advice.time_shift_minutes > 0 ? '⏩' : '⏪'}{' '}
+                      {Math.abs(weatherData.drive_window_advice.time_shift_minutes)} minutes{' '}
+                      {weatherData.drive_window_advice.time_shift_minutes > 0 ? 'later' : 'earlier'}
+                    </Text>
+                  )}
+
+                  {weatherData.drive_window_advice.alternate_route_available && (
+                    <Text style={styles.driveWindowAlternate}>
+                      🛣️ Alternate routes may be available
+                    </Text>
+                  )}
                 </View>
+              ) : (
+                <Pressable style={styles.premiumCard} onPress={() => router.push("/premium")}>
+                  <Text style={styles.premiumIcon}>🔒</Text>
+                  <Text style={styles.premiumTitle}>Drive Window Advisor</Text>
+                  <Text style={styles.premiumDescription}>
+                    Get smart departure time recommendations to avoid bad weather
+                  </Text>
+                  <View style={styles.premiumBtn}>
+                    <Text style={styles.premiumBtnText}>Unlock with Pro</Text>
+                  </View>
+                </Pressable>
+              )
+            )}
 
-                {/* Waypoint Weather Cards */}
-                {routeData.waypoints.map((wp, index) => (
-                  <View key={index} style={styles.waypointCard}>
-                    <View style={styles.waypointHeader}>
-                      <View style={styles.waypointLabel}>
-                        <Text style={styles.waypointName} numberOfLines={1}>
-                          {wp.waypoint.name ||
-                            (index === 0
-                              ? 'Start'
-                              : index === routeData.waypoints.length - 1
-                              ? 'End'
-                              : `Point ${index}`)}
+            {/* Severe Weather Alert */}
+            {weatherData.has_severe_weather && (
+              <View style={[styles.card, styles.alertCard]}>
+                <Text style={styles.alertTitle}>⚠️ Severe Weather Alert</Text>
+                <Text style={styles.alertText}>
+                  Severe weather detected along your route. Check waypoints below for details.
+                </Text>
+              </View>
+            )}
+
+            {/* Bridge Clearance Warnings */}
+            {weatherData.has_bridge_warnings && weatherData.bridge_clearances && weatherData.bridge_clearances.length > 0 && (
+              <View style={[styles.card, styles.bridgeWarningCard]}>
+                <Text style={styles.bridgeWarningTitle}>🚛 Low Bridge Warnings</Text>
+                <Text style={styles.bridgeWarningSubtext}>
+                  {weatherData.bridge_clearances.length} low clearance{weatherData.bridge_clearances.length > 1 ? 's' : ''} detected for your vehicle height
+                </Text>
+                {weatherData.bridge_clearances.map((bridge: any, idx: number) => {
+                  const warningColor = bridge.warning_level === 'critical' ? '#ff4444' : 
+                                      bridge.warning_level === 'warning' ? '#ff9944' : '#ffcc44';
+                  return (
+                    <View key={idx} style={[styles.bridgeItem, { borderLeftColor: warningColor }]}>
+                      <Text style={styles.bridgeName}>
+                        {bridge.name || `Bridge ${idx + 1}`}
+                      </Text>
+                      {bridge.distance_from_start != null && (
+                        <Text style={styles.bridgeDistance}>
+                          📍 {bridge.distance_from_start.toFixed(1)} miles from start
                         </Text>
-                        {wp.alerts.length > 0 && (
-                          <View style={styles.alertBadge}>
-                            <Ionicons name="warning" size={12} color="#fff" />
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.waypointMeta}>
-                        {wp.waypoint.distance_from_start !== null && wp.waypoint.distance_from_start > 0 && (
-                          <Text style={styles.waypointDistance}>{Math.round(wp.waypoint.distance_from_start)} mi</Text>
-                        )}
-                        {wp.waypoint.arrival_time && (
-                          <Text style={styles.waypointEta}>
-                            ETA {format(parseISO(wp.waypoint.arrival_time), 'h:mm a')}
-                          </Text>
-                        )}
-                      </View>
+                      )}
+                      <Text style={styles.bridgeClearance}>
+                        Clearance: {bridge.clearance_feet}' ({bridge.clearance_meters}m)
+                      </Text>
+                      {bridge.warning_level === 'critical' && (
+                        <Text style={styles.bridgeCritical}>
+                          ⛔ CRITICAL: Vehicle may not fit!
+                        </Text>
+                      )}
+                      {bridge.warning_level === 'warning' && (
+                        <Text style={styles.bridgeWarningText}>
+                          ⚠️ Tight clearance - use caution
+                        </Text>
+                      )}
                     </View>
+                  );
+                })}
+              </View>
+            )}
 
-                    {wp.weather ? (
-                      <View style={styles.weatherContent}>
-                        <View style={styles.tempSection}>
-                          <Ionicons name={getWeatherIcon(wp.weather.conditions) as any} size={36} color="#eab308" />
-                          <Text style={styles.temperature}>
-                            {wp.weather.temperature}°{wp.weather.temperature_unit}
-                          </Text>
-                        </View>
-                        <Text style={styles.conditions}>{wp.weather.conditions || 'Unknown'}</Text>
+            {/* Trip Stats */}
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>📊 Trip Overview</Text>
+              <View style={styles.statRow}>
+                <Text style={styles.statLabel}>Duration:</Text>
+                <Text style={styles.statValue}>
+                  {Math.floor((weatherData.total_duration_minutes || 0) / 60)}h{" "}
+                  {(weatherData.total_duration_minutes || 0) % 60}m
+                </Text>
+              </View>
+              <View style={styles.statRow}>
+                <Text style={styles.statLabel}>Waypoints:</Text>
+                <Text style={styles.statValue}>
+                  {weatherData.waypoints?.length || 0} locations
+                </Text>
+              </View>
+            </View>
 
-                        <View style={styles.weatherDetails}>
-                          <View style={styles.detailItem}>
-                            <MaterialCommunityIcons name="weather-windy" size={18} color="#a1a1aa" />
-                            <Text style={styles.detailText}>{wp.weather.wind_speed || 'N/A'}</Text>
-                          </View>
-                          {wp.weather.humidity !== null && wp.weather.humidity !== undefined && (
-                            <View style={styles.detailItem}>
-                              <Ionicons name="water" size={18} color="#a1a1aa" />
-                              <Text style={styles.detailText}>{wp.weather.humidity}%</Text>
-                            </View>
+            {/* Packing Suggestions */}
+            {weatherData.packing_suggestions && Array.isArray(weatherData.packing_suggestions) && weatherData.packing_suggestions.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>🎒 Packing Suggestions</Text>
+                {weatherData.packing_suggestions.map((item: any, idx: number) => {
+                  let displayText = '';
+                  if (typeof item === 'string') {
+                    displayText = item;
+                  } else if (item && typeof item === 'object') {
+                    displayText = item.item || item.name || item.suggestion || String(item);
+                  } else {
+                    displayText = String(item);
+                  }
+                  
+                  return (
+                    <Text key={idx} style={styles.packingItem}>
+                      • {displayText}
+                    </Text>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Waypoints Weather */}
+            {weatherData.waypoints && Array.isArray(weatherData.waypoints) && weatherData.waypoints.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>🗺️ Weather Along Route</Text>
+                {weatherData.waypoints.map((wp: any, idx: number) => {
+                  if (!wp) return null;
+                  
+                  const waypointName = wp.waypoint?.name || `Point ${idx + 1}`;
+                  const distance = wp.waypoint?.distance_from_start;
+                  const weather = wp.weather;
+                  const alerts = wp.alerts;
+                  
+                  return (
+                    <View key={idx} style={styles.waypointCard}>
+                      <Text style={styles.waypointName}>{waypointName}</Text>
+                      
+                      {distance != null && (
+                        <Text style={styles.waypointDistance}>
+                          {typeof distance === 'number' ? distance.toFixed(0) : distance} miles from start
+                        </Text>
+                      )}
+
+                      {weather && (
+                        <View style={styles.weatherInfo}>
+                          {weather.temperature != null && (
+                            <Text style={styles.weatherTemp}>
+                              {weather.temperature}°{weather.temperature_unit || "F"}
+                            </Text>
+                          )}
+                          {weather.conditions && (
+                            <Text style={styles.weatherCondition}>
+                              {String(weather.conditions)}
+                            </Text>
+                          )}
+                          {weather.wind_speed && (
+                            <Text style={styles.weatherWind}>
+                              Wind: {String(weather.wind_speed)}
+                            </Text>
                           )}
                         </View>
-                      </View>
-                    ) : (
-                      <View style={styles.noWeather}>
-                        <Ionicons name="cloud-offline" size={32} color="#52525b" />
-                        <Text style={styles.noWeatherText}>Weather unavailable</Text>
-                      </View>
-                    )}
+                      )}
 
-                    {wp.alerts.length > 0 && (
-                      <View style={styles.alertTags}>
-                        {wp.alerts.slice(0, 2).map((alert, alertIndex) => (
-                          <View key={alertIndex} style={styles.alertTag}>
-                            <Text style={styles.alertTagText} numberOfLines={1}>
-                              {alert.event}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                ))}
-              </>
-            )}
-
-            {activeTab === 'timeline' && (
-              <View style={styles.timelineContainer}>
-                <Text style={styles.timelineTitle}>Hourly Weather Timeline</Text>
-                {routeData.weather_timeline && routeData.weather_timeline.length > 0 ? (
-                  routeData.weather_timeline.map((hour, index) => (
-                    <View key={index} style={styles.timelineItem}>
-                      <Text style={styles.timelineTime}>
-                        {hour.time ? format(parseISO(hour.time), 'h a') : '--'}
-                      </Text>
-                      <View style={styles.timelineWeather}>
-                        <Ionicons name={getWeatherIcon(hour.conditions) as any} size={24} color="#eab308" />
-                        <Text style={styles.timelineTemp}>{hour.temperature}°</Text>
-                      </View>
-                      <Text style={styles.timelineConditions} numberOfLines={1}>
-                        {hour.conditions}
-                      </Text>
-                      <Text style={styles.timelineWind}>{hour.wind_speed}</Text>
+                      {/* Weather Alerts */}
+                      {alerts && Array.isArray(alerts) && alerts.length > 0 && (
+                        <View style={styles.alertsContainer}>
+                          <Text style={styles.alertsTitle}>⚠️ Active Alerts:</Text>
+                          {alerts.map((alert: any, alertIdx: number) => {
+                            if (!alert) return null;
+                            return (
+                              <View key={alertIdx} style={styles.alertItem}>
+                                <Text style={styles.alertSeverity}>
+                                  {String(alert.severity || "Alert")}
+                                </Text>
+                                <Text style={styles.alertEvent}>
+                                  {String(alert.event || "Weather Alert")}
+                                </Text>
+                                {alert.headline && (
+                                  <Text style={styles.alertHeadline} numberOfLines={2}>
+                                    {String(alert.headline)}
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
-                  ))
-                ) : (
-                  <Text style={styles.noDataText}>No timeline data available</Text>
-                )}
+                  );
+                })}
               </View>
             )}
-
-            {activeTab === 'packing' && (
-              <View style={styles.packingContainer}>
-                <Text style={styles.packingTitle}>Packing Suggestions</Text>
-                <Text style={styles.packingSubtitle}>Based on weather along your route</Text>
-
-                {routeData.packing_suggestions && routeData.packing_suggestions.length > 0 ? (
-                  routeData.packing_suggestions.map((item, index) => (
-                    <View key={index} style={styles.packingItem}>
-                      <View style={[styles.priorityDot, { backgroundColor: getPriorityColor(item.priority) }]} />
-                      <View style={styles.packingInfo}>
-                        <Text style={styles.packingItemName}>{item.item}</Text>
-                        <Text style={styles.packingReason}>{item.reason}</Text>
-                      </View>
-                      <View style={[styles.priorityBadge, { backgroundColor: `${getPriorityColor(item.priority)}20` }]}>
-                        <Text style={[styles.priorityText, { color: getPriorityColor(item.priority) }]}>
-                          {item.priority}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.noDataText}>No packing suggestions available</Text>
-                )}
-              </View>
-            )}
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </View>
-      )}
-    </View>
+          </>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.subText}>
+              Preparing to fetch weather data...
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f0f0f',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#0f0f0f',
-  },
-  loadingText: {
-    color: '#a1a1aa',
-    marginTop: 16,
-    fontSize: 16,
-  },
-  mapContainer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  map: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-  },
-  headerSafe: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(39, 39, 42, 0.95)',
-    marginHorizontal: 10,
-    marginTop: 8,
-    borderRadius: 12,
-  },
-  backButton: {
-    padding: 6,
-    marginRight: 6,
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  headerRoute: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  headerStats: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  markerToggle: {
-    padding: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    borderRadius: 8,
-    marginRight: 4,
-  },
-  markerToggleOff: {
-    backgroundColor: 'rgba(107, 114, 128, 0.2)',
-  },
-  toggleButton: {
-    padding: 6,
-  },
-  alertBanner: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 100 : 75,
-    left: 10,
-    right: 10,
-    backgroundColor: '#dc2626',
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
+  safe: { flex: 1, backgroundColor: "#0b1220" },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 14,
-    gap: 8,
-    zIndex: 10,
+    paddingVertical: 10,
+    gap: 10,
   },
-  alertBannerText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  weatherPanel: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    maxHeight: '58%',
-    backgroundColor: '#18181b',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
-    gap: 12,
-    alignItems: 'center',
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#27272a',
-    paddingHorizontal: 12,
+  backBtn: {
     paddingVertical: 8,
-    borderRadius: 8,
-  },
-  actionButtonText: {
-    color: '#60a5fa',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  sunTimes: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  sunTimeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  sunTimeText: {
-    color: '#a1a1aa',
-    fontSize: 11,
-  },
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    gap: 8,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: '#3f3f46',
-  },
-  tabText: {
-    color: '#6b7280',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: '#eab308',
-  },
-  weatherScroll: {
-    paddingHorizontal: 16,
-  },
-  summaryCard: {
-    backgroundColor: '#5b2133',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-  },
-  summaryHeader: {
-    marginBottom: 10,
-  },
-  summaryTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  summaryTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  alertsDetectedBanner: {
-    backgroundColor: '#dc2626',
-    borderRadius: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
     paddingHorizontal: 10,
-    gap: 6,
-    marginBottom: 10,
-  },
-  alertsDetectedText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  summaryText: {
-    color: '#e4e4e7',
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  waypointCard: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  waypointHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  waypointLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  waypointName: {
-    color: '#eab308',
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-  },
-  alertBadge: {
-    backgroundColor: '#dc2626',
     borderRadius: 10,
-    padding: 3,
+    backgroundColor: "#16213a",
   },
-  waypointMeta: {
-    alignItems: 'flex-end',
+  backText: { color: "#cfe3ff", fontWeight: "700" },
+  title: { color: "white", fontSize: 18, fontWeight: "800" },
+  container: { padding: 14, gap: 12 },
+  card: {
+    backgroundColor: "#121a2b",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#23304f",
   },
-  waypointDistance: {
-    color: '#a1a1aa',
-    fontSize: 11,
+  label: { color: "#9fb5d6", fontWeight: "700", marginBottom: 6 },
+  routeText: { color: "white", fontSize: 16, fontWeight: "800" },
+  subText: { color: "#b8c7df", marginTop: 2 },
+  primaryBtn: {
+    marginTop: 14,
+    backgroundColor: "#f3c300",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
   },
-  waypointEta: {
-    color: '#60a5fa',
-    fontSize: 11,
-    fontWeight: '500',
+  primaryBtnText: { fontWeight: "900", color: "#121212" },
+  center: { alignItems: "center", gap: 10, paddingVertical: 14 },
+  errorTitle: { color: "#ffb4b4", fontWeight: "900", marginBottom: 6 },
+  errorText: { color: "#ffd0d0" },
+  
+  // New styles for weather display
+  sectionTitle: {
+    color: "#f3c300",
+    fontSize: 16,
+    fontWeight: "900",
+    marginBottom: 10,
   },
-  weatherContent: {
+  aiText: {
+    color: "#d8e7ff",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  alertCard: {
+    backgroundColor: "#2d1a1a",
+    borderColor: "#ff6b6b",
+  },
+  alertTitle: {
+    color: "#ff6b6b",
+    fontSize: 16,
+    fontWeight: "900",
     marginBottom: 6,
   },
-  tempSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 2,
-  },
-  temperature: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '700',
-  },
-  conditions: {
-    color: '#e4e4e7',
+  alertText: {
+    color: "#ffb4b4",
     fontSize: 14,
+  },
+  statRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
-  weatherDetails: {
-    flexDirection: 'row',
-    gap: 16,
+  statLabel: {
+    color: "#9fb5d6",
+    fontSize: 14,
+    fontWeight: "600",
   },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  detailText: {
-    color: '#a1a1aa',
-    fontSize: 13,
-  },
-  noWeather: {
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  noWeatherText: {
-    color: '#52525b',
-    fontSize: 13,
-    marginTop: 6,
-  },
-  alertTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    paddingTop: 10,
-  },
-  alertTag: {
-    backgroundColor: 'rgba(220, 38, 38, 0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 5,
-  },
-  alertTagText: {
-    color: '#fca5a5',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  timelineContainer: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 14,
-  },
-  timelineTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  timelineItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#3f3f46',
-  },
-  timelineTime: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    width: 50,
-  },
-  timelineWeather: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    width: 70,
-  },
-  timelineTemp: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  timelineConditions: {
-    flex: 1,
-    color: '#e4e4e7',
-    fontSize: 12,
-  },
-  timelineWind: {
-    color: '#a1a1aa',
-    fontSize: 11,
-    width: 60,
-    textAlign: 'right',
-  },
-  packingContainer: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 14,
-  },
-  packingTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  packingSubtitle: {
-    color: '#6b7280',
-    fontSize: 12,
-    marginBottom: 14,
+  statValue: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
   },
   packingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#3f3f46',
-    gap: 10,
-  },
-  priorityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  packingInfo: {
-    flex: 1,
-  },
-  packingItemName: {
-    color: '#fff',
+    color: "#d8e7ff",
     fontSize: 14,
-    fontWeight: '500',
+    marginBottom: 6,
   },
-  packingReason: {
-    color: '#a1a1aa',
-    fontSize: 11,
+  waypointCard: {
+    backgroundColor: "#0f1621",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#1a2740",
+  },
+  waypointName: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  waypointDistance: {
+    color: "#9fb5d6",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  weatherInfo: {
+    backgroundColor: "#1a2740",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 6,
+  },
+  weatherTemp: {
+    color: "#f3c300",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  weatherCondition: {
+    color: "#d8e7ff",
+    fontSize: 14,
+    marginTop: 4,
+  },
+  weatherWind: {
+    color: "#9fb5d6",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  alertsContainer: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: "#2d1a1a",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ff6b6b",
+  },
+  alertsTitle: {
+    color: "#ff6b6b",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  alertItem: {
+    marginBottom: 8,
+  },
+  alertSeverity: {
+    color: "#ff6b6b",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  alertEvent: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
     marginTop: 2,
   },
-  priorityBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
+  alertHeadline: {
+    color: "#ffb4b4",
+    fontSize: 12,
+    marginTop: 4,
   },
-  priorityText: {
-    fontSize: 10,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+
+  // Bridge warning styles
+  bridgeWarningCard: {
+    backgroundColor: "#2a1a0f",
+    borderColor: "#ff9944",
   },
-  noDataText: {
-    color: '#6b7280',
+  bridgeWarningTitle: {
+    color: "#ff9944",
+    fontSize: 16,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  bridgeWarningSubtext: {
+    color: "#ffcc99",
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  bridgeItem: {
+    backgroundColor: "#1a1410",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 4,
+  },
+  bridgeName: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  bridgeDistance: {
+    color: "#ffcc99",
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  bridgeClearance: {
+    color: "#d8e7ff",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  bridgeCritical: {
+    color: "#ff4444",
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 6,
+  },
+  bridgeWarningText: {
+    color: "#ff9944",
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+
+  // Risk score styles
+  riskCard: {
+    backgroundColor: "#1a2b1a",
+    borderColor: "#4ade80",
+  },
+  riskCardMedium: {
+    backgroundColor: "#2b2b1a",
+    borderColor: "#facc15",
+  },
+  riskCardHigh: {
+    backgroundColor: "#2b1f1a",
+    borderColor: "#ff9944",
+  },
+  riskCardCritical: {
+    backgroundColor: "#2b1a1a",
+    borderColor: "#ff4444",
+  },
+  riskScoreContainer: {
+    alignItems: "center",
+    marginVertical: 16,
+  },
+  riskPercent: {
+    color: "#fff",
+    fontSize: 48,
+    fontWeight: "900",
+  },
+  riskLevel: {
+    color: "#facc15",
+    fontSize: 16,
+    fontWeight: "900",
+    marginTop: 8,
+  },
+  riskDelay: {
+    color: "#d8e7ff",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  riskFactors: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  riskFactorsTitle: {
+    color: "#9fb5d6",
     fontSize: 14,
-    textAlign: 'center',
-    paddingVertical: 20,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  riskFactor: {
+    color: "#d8e7ff",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+
+  // Drive window advisor styles
+  driveWindowCard: {
+    backgroundColor: "#1a1f2b",
+    borderColor: "#4ade80",
+  },
+  driveWindowCardCritical: {
+    backgroundColor: "#2b1a1a",
+    borderColor: "#ff4444",
+  },
+  driveWindowReason: {
+    color: "#d8e7ff",
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  driveWindowTime: {
+    backgroundColor: "rgba(250,204,21,0.1)",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  driveWindowTimeLabel: {
+    color: "#9fb5d6",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  driveWindowTimeValue: {
+    color: "#facc15",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  driveWindowShift: {
+    color: "#4ade80",
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  driveWindowAlternate: {
+    color: "#9fb5d6",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 12,
+    fontStyle: "italic",
+  },
+
+  // Premium paywall styles
+  premiumCard: {
+    backgroundColor: "rgba(250,204,21,0.05)",
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 2,
+    borderColor: "#facc15",
+    borderStyle: "dashed",
+    alignItems: "center",
+  },
+  premiumIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  premiumTitle: {
+    color: "#facc15",
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  premiumDescription: {
+    color: "#d8e7ff",
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  premiumBtn: {
+    backgroundColor: "#facc15",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  premiumBtnText: {
+    color: "#0a0a0a",
+    fontSize: 15,
+    fontWeight: "900",
   },
 });
-
