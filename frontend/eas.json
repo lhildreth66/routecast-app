@@ -21,7 +21,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://routecast-backend.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://routecast-app.onrender.com"
       }
     },
     "production": {
@@ -34,7 +34,7 @@
         "credentialsSource": "remote"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://routecast-backend.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://routecast-app.onrender.com"
       }
     }
   },
