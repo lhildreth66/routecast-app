@@ -27,7 +27,7 @@
 
     "android": {
       "package": "com.routecast.app",
-      "versionCode": 1,
+      "versionCode": 3,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
