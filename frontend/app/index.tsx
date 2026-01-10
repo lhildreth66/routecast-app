@@ -1296,4 +1296,21 @@ const styles = StyleSheet.create({
   vehicleOptionTextActive: {
     color: '#eab308',
   },
+  webDatePicker: {
+    paddingVertical: 16,
+  },
+  datePickerLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  selectedDateTime: {
+    color: '#eab308',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  },
 });
