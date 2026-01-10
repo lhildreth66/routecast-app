@@ -23,6 +23,17 @@ import { format } from 'date-fns';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// Vehicle types for safety scoring
+const VEHICLE_TYPES = [
+  { id: 'car', label: 'Car/Sedan', icon: 'car-sport-outline' },
+  { id: 'suv', label: 'SUV', icon: 'car-outline' },
+  { id: 'truck', label: 'Pickup Truck', icon: 'car-outline' },
+  { id: 'semi', label: 'Semi Truck', icon: 'bus-outline' },
+  { id: 'rv', label: 'RV/Motorhome', icon: 'home-outline' },
+  { id: 'motorcycle', label: 'Motorcycle', icon: 'bicycle-outline' },
+  { id: 'trailer', label: 'Vehicle + Trailer', icon: 'train-outline' },
+];
+
 interface StopPoint {
   location: string;
   type: string;
