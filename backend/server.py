@@ -1638,6 +1638,69 @@ async def autocomplete_location(query: str, limit: int = 5):
         logger.error(f"Autocomplete error for '{query}': {e}")
         return []
 
+@api_router.post("/chat", response_model=ChatResponse)
+async def driver_chat(request: ChatMessage):
+    """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
+    try:
+        # Initialize the chat with Emergent LLM
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"driver-{uuid.uuid4().hex[:8]}",
+            system_message="""You are Routecast AI, a helpful driving assistant that helps drivers with:
+- Weather and road condition questions
+- Safe driving tips based on weather
+- Route planning advice
+- What to pack for a trip
+- Rest stop recommendations
+- Understanding weather alerts and hazards
+
+Keep responses concise (2-3 sentences max) and actionable. Use emojis sparingly.
+If asked about specific locations, provide general advice since you don't have real-time data in this chat.
+Always prioritize safety in your recommendations."""
+        )
+        
+        # Use Gemini Flash for fast responses
+        chat.with_model("gemini", "gemini-2.5-flash")
+        
+        # Build the user message with optional route context
+        message_text = request.message
+        if request.route_context:
+            message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
+        
+        user_message = UserMessage(text=message_text)
+        
+        # Get response
+        response = await chat.send_message(user_message)
+        
+        # Generate quick suggestions based on the question
+        suggestions = []
+        question_lower = request.message.lower()
+        
+        if "ice" in question_lower or "snow" in question_lower:
+            suggestions = ["What speed should I drive in snow?", "Do I need chains?", "Black ice tips"]
+        elif "rain" in question_lower:
+            suggestions = ["Hydroplaning prevention", "Following distance in rain", "When to pull over"]
+        elif "wind" in question_lower:
+            suggestions = ["Safe driving in high winds", "Should I delay my trip?"]
+        elif "fog" in question_lower:
+            suggestions = ["Fog driving tips", "What lights to use in fog"]
+        elif "tired" in question_lower or "fatigue" in question_lower:
+            suggestions = ["Rest stop tips", "Signs of drowsy driving", "Coffee vs. nap"]
+        else:
+            suggestions = ["Check road conditions", "Safest time to drive", "Packing tips"]
+        
+        return ChatResponse(
+            response=response,
+            suggestions=suggestions[:3]
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return ChatResponse(
+            response="I'm having trouble connecting right now. Please check your route conditions on the main screen or try again in a moment.",
+            suggestions=["Check road conditions", "View weather alerts", "Contact support"]
+        )
+
 # Include the router in the main app
 app.include_router(api_router)
 
