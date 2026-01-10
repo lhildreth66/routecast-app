@@ -11,6 +11,7 @@ import {
   Switch,
   FlatList,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -580,9 +581,19 @@ export default function IndexScreen() {
               mode="datetime"
               display="default"
               onChange={(event, selectedDate) => {
-                setShowPicker(false);
-                if (selectedDate) {
+                // On Android, dismiss happens automatically
+                if (Platform.OS === 'android') {
+                  setShowPicker(false);
+                }
+                
+                // Handle the selected date
+                if (event.type === 'set' && selectedDate) {
                   setDeparture(selectedDate);
+                  if (Platform.OS === 'ios') {
+                    setShowPicker(false);
+                  }
+                } else if (event.type === 'dismissed') {
+                  setShowPicker(false);
                 }
               }}
             />
