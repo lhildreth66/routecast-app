@@ -26,7 +26,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
     return waypoints.filter(wp => {
       const hasAlerts = wp.weather?.alerts && wp.weather.alerts.length > 0;
       const badConditions = ['thunderstorm', 'snow', 'ice', 'fog', 'tornado', 'hurricane'];
-      const hasBadCondition = badConditions.some(cond => 
+      const hasBadCondition = badConditions.some(cond =>
         wp.weather?.condition?.toLowerCase().includes(cond)
       );
       return hasAlerts || hasBadCondition;
@@ -36,22 +36,22 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
   // Calculate bounds
   const bounds = useMemo(() => {
     if (waypoints.length === 0) return null;
-    
+
     const lats = waypoints.map(wp => wp.lat);
-    const lngs = waypoints.map(wp => wp.lng);
-    
+    const lons = waypoints.map(wp => wp.lon);
+
     return {
-      minLng: Math.min(...lngs),
+      minLon: Math.min(...lons),
       minLat: Math.min(...lats),
-      maxLng: Math.max(...lngs),
+      maxLon: Math.max(...lons),
       maxLat: Math.max(...lats),
     };
   }, [waypoints]);
 
   const center = bounds ? {
-    lng: (bounds.minLng + bounds.maxLng) / 2,
+    lon: (bounds.minLon + bounds.maxLon) / 2,
     lat: (bounds.minLat + bounds.maxLat) / 2,
-  } : { lng: -95, lat: 40 };
+  } : { lon: -95, lat: 40 };
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -74,7 +74,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
     const map = new mapboxgl.Map({
       container: 'map',
       style: 'mapbox://styles/mapbox/dark-v11',
-      center: [${center.lng}, ${center.lat}],
+      center: [${center.lon}, ${center.lat}],
       zoom: 6
     });
 
@@ -87,7 +87,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
           properties: {},
           geometry: {
             type: 'LineString',
-            coordinates: ${JSON.stringify(waypoints.map(wp => [wp.lng, wp.lat]))}
+            coordinates: ${JSON.stringify(waypoints.map(wp => [wp.lon, wp.lat]))}
           }
         }
       });
@@ -116,7 +116,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
       startEl.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)';
       
       new mapboxgl.Marker({ element: startEl })
-        .setLngLat([${waypoints[0]?.lng || 0}, ${waypoints[0]?.lat || 0}])
+        .setLngLat([${waypoints[0]?.lon || 0}, ${waypoints[0]?.lat || 0}])
         .setPopup(new mapboxgl.Popup().setHTML('<strong>${origin}</strong>'))
         .addTo(map);
 
@@ -131,7 +131,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
       
       const lastWp = ${waypoints.length - 1};
       new mapboxgl.Marker({ element: endEl })
-        .setLngLat([${waypoints[waypoints.length - 1]?.lng || 0}, ${waypoints[waypoints.length - 1]?.lat || 0}])
+        .setLngLat([${waypoints[waypoints.length - 1]?.lon || 0}, ${waypoints[waypoints.length - 1]?.lat || 0}])
         .setPopup(new mapboxgl.Popup().setHTML('<strong>${destination}</strong>'))
         .addTo(map);
 
@@ -149,7 +149,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
                    (point.weather?.condition || 'Adverse conditions') + '</div>');
         
         new mapboxgl.Marker({ element: el })
-          .setLngLat([point.lng, point.lat])
+          .setLngLat([point.lon, point.lat])
           .setPopup(popup)
           .addTo(map);
       });
@@ -158,7 +158,7 @@ export function RouteMap({ routeGeometry, waypoints, origin, destination }: Rout
       if (${waypoints.length} > 1) {
         const bounds = new mapboxgl.LngLatBounds();
         ${JSON.stringify(waypoints)}.forEach(wp => {
-          bounds.extend([wp.lng, wp.lat]);
+          bounds.extend([wp.lon, wp.lat]);
         });
         map.fitBounds(bounds, { padding: 50 });
       }

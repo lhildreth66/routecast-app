@@ -214,8 +214,8 @@ export default function RouteWeatherScreen() {
                 <RouteMap
                   routeGeometry={weatherData.route_geometry || ''}
                   waypoints={weatherData.waypoints.map((wp: any) => ({
-                    lat: wp.lat,
-                    lng: wp.lng,
+                    lat: wp.waypoint?.lat || 0,
+                    lon: wp.waypoint?.lon || 0,
                     weather: wp.weather,
                   }))}
                   origin={origin}
