@@ -931,7 +931,7 @@ def calculate_optimal_departure(origin: str, destination: str, waypoints_weather
     else:
         # Suggest waiting
         recommendation = "⏰ Consider departing 2-3 hours later for improved conditions"
-        conditions_summary = f"Current concerns: {', '.join(set(current_conditions)[:3]) if current_conditions else 'Weather alerts active'}"
+        conditions_summary = f"Current concerns: {', '.join(list(set(current_conditions))[:3]) if current_conditions else 'Weather alerts active'}"
     
     # Calculate estimated arrival
     total_duration = waypoints_weather[-1].waypoint.eta_minutes if waypoints_weather else 120
