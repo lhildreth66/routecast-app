@@ -414,6 +414,83 @@ export default function RouteScreen() {
     }
   };
 
+  // Speak individual waypoint weather
+  const speakWaypointWeather = async (wp: WaypointWeather, index: number) => {
+    // Stop if already speaking this waypoint
+    if (speakingWaypointIndex === index) {
+      await Speech.stop();
+      setSpeakingWaypointIndex(null);
+      setIsSpeaking(false);
+      return;
+    }
+    
+    // Stop any current speech
+    await Speech.stop();
+    setIsSpeaking(true);
+    setSpeakingWaypointIndex(index);
+    
+    const parts: string[] = [];
+    const locationName = wp.waypoint.name || `Point ${index + 1}`;
+    
+    // Location intro
+    parts.push(`Weather for ${locationName}.`);
+    
+    // Distance and ETA info
+    if (wp.waypoint.distance_from_start && wp.waypoint.distance_from_start > 0) {
+      parts.push(`${Math.round(wp.waypoint.distance_from_start)} miles from start.`);
+    }
+    if (wp.waypoint.eta_minutes && wp.waypoint.eta_minutes > 0) {
+      const hours = Math.floor(wp.waypoint.eta_minutes / 60);
+      const mins = Math.round(wp.waypoint.eta_minutes % 60);
+      if (hours > 0) {
+        parts.push(`Estimated arrival in ${hours} hours and ${mins} minutes.`);
+      } else {
+        parts.push(`Estimated arrival in ${mins} minutes.`);
+      }
+    }
+    
+    // Weather conditions
+    if (wp.weather) {
+      const temp = wp.weather.temperature;
+      const conditions = wp.weather.conditions || 'unknown conditions';
+      const wind = wp.weather.wind_speed || 'calm winds';
+      const humidity = wp.weather.humidity;
+      
+      parts.push(`Current temperature is ${temp} degrees Fahrenheit, ${conditions}.`);
+      parts.push(`Wind ${wind}.`);
+      
+      if (humidity) {
+        parts.push(`Humidity at ${humidity} percent.`);
+      }
+    } else {
+      parts.push('Weather data is currently unavailable for this location.');
+    }
+    
+    // Weather alerts
+    if (wp.alerts.length > 0) {
+      parts.push(`Warning: ${wp.alerts.length} weather alert${wp.alerts.length > 1 ? 's' : ''} at this location.`);
+      wp.alerts.forEach((alert, i) => {
+        parts.push(`Alert ${i + 1}: ${alert.event}. ${alert.headline}`);
+      });
+    }
+    
+    const fullText = parts.join(' ');
+    
+    Speech.speak(fullText, {
+      language: 'en-US',
+      pitch: 1.0,
+      rate: 0.9,
+      onDone: () => {
+        setSpeakingWaypointIndex(null);
+        setIsSpeaking(false);
+      },
+      onError: () => {
+        setSpeakingWaypointIndex(null);
+        setIsSpeaking(false);
+      },
+    });
+  };
+
   if (!routeData) {
     return (
       <SafeAreaView style={styles.container}>
