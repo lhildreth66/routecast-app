@@ -1587,7 +1587,7 @@ async def autocomplete_location(query: str, limit: int = 5):
                 'access_token': MAPBOX_ACCESS_TOKEN,
                 'autocomplete': 'true',
                 'types': 'place,locality,address,poi',
-                'country': 'US',
+                'country': 'US,PR,VI,GU,AS',  # US + Puerto Rico + Virgin Islands + Guam + American Samoa
                 'limit': limit
             }
             response = await client.get(url, params=params)
@@ -1604,7 +1604,7 @@ async def autocomplete_location(query: str, limit: int = 5):
                 region = ''
                 for ctx in context:
                     if ctx.get('id', '').startswith('region'):
-                        region = ctx.get('short_code', '').replace('US-', '')
+                        region = ctx.get('short_code', '').replace('US-', '').replace('PR-', 'PR').replace('VI-', 'VI')
                         break
                 
                 suggestions.append({
