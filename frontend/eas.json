@@ -1,19 +1,11 @@
 {
   "cli": {
-    "version": ">= 5.0.0",
-    "appVersionSource": "local"
+    "version": ">= 5.0.0"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
-      },
-      "ios": {
-        "simulator": true
-      }
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal",
@@ -22,28 +14,8 @@
       }
     },
     "production": {
-      "distribution": "store",
       "android": {
-        "buildType": "app-bundle",
-        "credentialsSource": "remote"
-      },
-      "ios": {
-        "credentialsSource": "remote"
-      },
-      "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://your-production-backend-url.com"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./play-store-credentials.json",
-        "track": "internal"
-      },
-      "ios": {
-        "appleId": "your-apple-id@email.com",
-        "ascAppId": "your-app-store-connect-app-id"
+        "buildType": "app-bundle"
       }
     }
   }
