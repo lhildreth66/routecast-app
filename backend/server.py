@@ -208,6 +208,7 @@ class RouteWeatherResponse(BaseModel):
     stops: List[StopPoint] = []
     departure_time: Optional[str] = None
     total_duration_minutes: Optional[int] = None
+    total_distance_miles: Optional[float] = None
     route_geometry: str  # Encoded polyline
     waypoints: List[WaypointWeather]
     ai_summary: Optional[str] = None
@@ -223,6 +224,13 @@ class RouteWeatherResponse(BaseModel):
     optimal_departure: Optional[DepartureWindow] = None
     trucker_warnings: List[str] = []
     vehicle_type: str = "car"
+    # Road conditions and navigation
+    turn_by_turn: List[TurnByTurnStep] = []
+    road_condition_summary: Optional[str] = None
+    worst_road_condition: Optional[str] = None
+    alternate_routes: List[AlternateRoute] = []
+    reroute_recommended: bool = False
+    reroute_reason: Optional[str] = None
 
 class SavedRoute(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
