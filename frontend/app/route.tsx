@@ -79,6 +79,45 @@ interface StopPoint {
   type: string;
 }
 
+interface HazardAlert {
+  type: string;
+  severity: string;
+  distance_miles: number;
+  eta_minutes: number;
+  message: string;
+  recommendation: string;
+  countdown_text: string;
+}
+
+interface RestStop {
+  name: string;
+  type: string;
+  lat: number;
+  lon: number;
+  distance_miles: number;
+  eta_minutes: number;
+  weather_at_arrival: string | null;
+  temperature_at_arrival: number | null;
+  recommendation: string;
+}
+
+interface DepartureWindow {
+  departure_time: string;
+  arrival_time: string;
+  safety_score: number;
+  hazard_count: number;
+  recommendation: string;
+  conditions_summary: string;
+}
+
+interface SafetyScore {
+  overall_score: number;
+  risk_level: string;
+  vehicle_type: string;
+  factors: string[];
+  recommendations: string[];
+}
+
 interface RouteData {
   id: string;
   origin: string;
@@ -93,6 +132,13 @@ interface RouteData {
   packing_suggestions?: PackingSuggestion[];
   weather_timeline?: HourlyForecast[];
   created_at: string;
+  // New fields
+  safety_score?: SafetyScore;
+  hazard_alerts?: HazardAlert[];
+  rest_stops?: RestStop[];
+  optimal_departure?: DepartureWindow;
+  trucker_warnings?: string[];
+  vehicle_type?: string;
 }
 
 // Decode polyline utility
