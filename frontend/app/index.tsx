@@ -963,11 +963,32 @@ export default function HomeScreen() {
                 ))}
               </View>
               
+              {/* Listening indicator */}
+              {isListening && (
+                <View style={styles.listeningIndicator}>
+                  <View style={styles.listeningPulse} />
+                  <Text style={styles.listeningText}>🎤 Listening... speak now</Text>
+                </View>
+              )}
+              
               {/* Input */}
               <View style={styles.chatInputRow}>
+                {/* Microphone button */}
+                <TouchableOpacity 
+                  style={[styles.micBtn, isListening && styles.micBtnActive]}
+                  onPress={startVoiceRecognition}
+                  disabled={isListening}
+                >
+                  <Ionicons 
+                    name={isListening ? "radio-button-on" : "mic"} 
+                    size={22} 
+                    color={isListening ? "#ef4444" : "#fff"} 
+                  />
+                </TouchableOpacity>
+                
                 <TextInput
                   style={styles.chatInput}
-                  placeholder="Ask about weather, roads, safety..."
+                  placeholder="Type or tap mic to speak..."
                   placeholderTextColor="#6b7280"
                   value={chatMessage}
                   onChangeText={setChatMessage}
