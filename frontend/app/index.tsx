@@ -481,6 +481,38 @@ export default function HomeScreen() {
                 )}
               </View>
 
+              {/* Vehicle Type Selector */}
+              <TouchableOpacity 
+                style={styles.vehicleSelector}
+                onPress={() => setShowVehicleSelector(true)}
+              >
+                <View style={styles.vehicleSelectorLeft}>
+                  <Ionicons name={VEHICLE_TYPES.find(v => v.id === vehicleType)?.icon as any || 'car-sport-outline'} size={22} color="#60a5fa" />
+                  <View>
+                    <Text style={styles.vehicleLabel}>Vehicle Type</Text>
+                    <Text style={styles.vehicleValue}>{VEHICLE_TYPES.find(v => v.id === vehicleType)?.label || 'Car'}</Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+              </TouchableOpacity>
+
+              {/* Trucker Mode Toggle */}
+              <View style={styles.truckerToggle}>
+                <View style={styles.alertsLeft}>
+                  <Ionicons name="bus-outline" size={22} color="#f59e0b" />
+                  <View>
+                    <Text style={styles.alertsText}>Trucker Mode</Text>
+                    <Text style={styles.truckerSubtext}>Wind & height warnings</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={truckerMode}
+                  onValueChange={setTruckerMode}
+                  trackColor={{ false: '#3f3f46', true: '#f59e0b80' }}
+                  thumbColor={truckerMode ? '#f59e0b' : '#71717a'}
+                />
+              </View>
+
               {/* Weather Alerts Toggle */}
               <View style={styles.alertsToggle}>
                 <View style={styles.alertsLeft}>
