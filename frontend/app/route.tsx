@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router, useFocusEffect } from "expo-router";
 import axios from "axios";
 import { getPremiumStatus } from "../utils/premium";
+import { RouteMap } from "../components/RouteMap";
 
 // Final, corrected version of the results screen (`route.tsx`)
 
@@ -203,6 +204,48 @@ export default function RouteWeatherScreen() {
           </View>
         ) : weatherData ? (
           <>
+            {/* Route Map */}
+            {weatherData.waypoints && weatherData.waypoints.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>🗺️ Route Map</Text>
+                <RouteMap
+                  routeGeometry={weatherData.route_geometry || ''}
+                  waypoints={weatherData.waypoints.map((wp: any) => ({
+                    lat: wp.lat,
+                    lng: wp.lng,
+                    weather: wp.weather,
+                  }))}
+                  origin={origin}
+                  destination={destination}
+                />
+              </View>
+            )}
+
+            {/* Bridge Warnings */}
+            {weatherData.has_bridge_warnings && weatherData.bridge_clearances && weatherData.bridge_clearances.length > 0 && (
+              <View style={[styles.card, styles.alertCard]}>
+                <Text style={styles.alertTitle}>🌉 Bridge Clearance Warnings</Text>
+                {weatherData.bridge_clearances.map((bridge: any, idx: number) => (
+                  <View key={idx} style={styles.bridgeWarning}>
+                    <Text style={styles.bridgeLocation}>
+                      📍 {bridge.location || `Bridge at mile ${bridge.distance_miles?.toFixed(1) || 0}`}
+                    </Text>
+                    <Text style={styles.bridgeClearance}>
+                      Clearance: {bridge.clearance_feet?.toFixed(1) || 'Unknown'} ft
+                    </Text>
+                    {bridge.clearance_feet < vehicleHeight && (
+                      <Text style={styles.bridgeDanger}>
+                        ⚠️ TOO LOW for your vehicle ({vehicleHeight} ft)
+                      </Text>
+                    )}
+                    {bridge.warning_message && (
+                      <Text style={styles.bridgeMessage}>{bridge.warning_message}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* AI Summary */}
             {weatherData.ai_summary && (
               <View style={styles.card}>
@@ -794,6 +837,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
     marginTop: 12,
+    fontStyle: "italic",
+  },
+
+  // Bridge warning styles
+  bridgeWarning: {
+    backgroundColor: "rgba(255,107,107,0.1)",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 10,
+  },
+  bridgeLocation: {
+    color: "#ffb4b4",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  bridgeClearance: {
+    color: "#ffd0d0",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  bridgeDanger: {
+    color: "#ff6b6b",
+    fontSize: 14,
+    fontWeight: "900",
+    marginTop: 6,
+  },
+  bridgeMessage: {
+    color: "#ffb4b4",
+    fontSize: 12,
+    marginTop: 4,
     fontStyle: "italic",
   },
 
