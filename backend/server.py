@@ -995,6 +995,254 @@ def calculate_optimal_departure(origin: str, destination: str, waypoints_weather
         conditions_summary=conditions_summary
     )
 
+def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAlert]) -> RoadCondition:
+    """Derive road surface condition from weather data."""
+    if not weather:
+        return RoadCondition(
+            condition="unknown",
+            severity=0,
+            label="UNKNOWN",
+            icon="❓",
+            color="#6b7280",
+            description="Weather data unavailable",
+            recommendation="Drive with normal caution"
+        )
+    
+    temp = weather.temperature or 50
+    conditions = (weather.conditions or "").lower()
+    wind_str = weather.wind_speed or "0 mph"
+    
+    try:
+        wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
+    except:
+        wind_speed = 0
+    
+    # Check for severe alerts first
+    severe_alerts = [a for a in alerts if a.severity in ["Extreme", "Severe"]]
+    if severe_alerts:
+        for alert in severe_alerts:
+            event = alert.event.lower()
+            if "flood" in event or "flash flood" in event:
+                return RoadCondition(
+                    condition="flooded",
+                    severity=4,
+                    label="FLOODING",
+                    icon="🌊",
+                    color="#dc2626",
+                    description=f"Flash flood warning - {alert.headline[:60]}",
+                    recommendation="🚫 DO NOT DRIVE - Find alternate route immediately"
+                )
+            if "ice" in event or "freezing" in event:
+                return RoadCondition(
+                    condition="icy",
+                    severity=3,
+                    label="ICY",
+                    icon="🧊",
+                    color="#ef4444",
+                    description=f"Ice storm - {alert.headline[:60]}",
+                    recommendation="⚠️ DANGEROUS - Avoid travel if possible"
+                )
+    
+    # Ice conditions (freezing temp + any precipitation)
+    if temp <= 32 and any(w in conditions for w in ["rain", "drizzle", "freezing", "sleet", "ice"]):
+        return RoadCondition(
+            condition="icy",
+            severity=3,
+            label="ICY ROADS",
+            icon="🧊",
+            color="#ef4444",
+            description=f"Freezing precipitation at {temp}°F",
+            recommendation="⚠️ Black ice likely - Reduce speed to 25 mph on bridges"
+        )
+    
+    # Snow covered
+    if "snow" in conditions or "blizzard" in conditions:
+        severity = 3 if "heavy" in conditions or "blizzard" in conditions else 2
+        return RoadCondition(
+            condition="snow_covered",
+            severity=severity,
+            label="SNOW",
+            icon="❄️",
+            color="#93c5fd",
+            description=f"Snow conditions at {temp}°F",
+            recommendation="🚗 Reduce speed 50%, increase following distance to 8 seconds"
+        )
+    
+    # Potential ice (just below freezing, roads may have frozen overnight)
+    if temp <= 36 and temp > 32:
+        return RoadCondition(
+            condition="slippery",
+            severity=2,
+            label="SLIPPERY",
+            icon="⚠️",
+            color="#f59e0b",
+            description=f"Near-freezing {temp}°F - bridges/overpasses may be icy",
+            recommendation="⚡ Watch for black ice on elevated surfaces"
+        )
+    
+    # Low visibility
+    if "fog" in conditions or "mist" in conditions or "smoke" in conditions:
+        return RoadCondition(
+            condition="low_visibility",
+            severity=2,
+            label="LOW VIS",
+            icon="🌫️",
+            color="#9ca3af",
+            description="Fog/reduced visibility",
+            recommendation="💡 Low beams only, reduce speed to match visibility"
+        )
+    
+    # Dangerous wind
+    if wind_speed > 35:
+        return RoadCondition(
+            condition="dangerous_wind",
+            severity=3,
+            label="HIGH WIND",
+            icon="💨",
+            color="#8b5cf6",
+            description=f"Dangerous crosswinds at {wind_speed} mph",
+            recommendation="🚛 HIGH-PROFILE VEHICLES: Consider stopping until winds subside"
+        )
+    
+    # Wet roads
+    if any(w in conditions for w in ["rain", "shower", "drizzle", "storm", "thunder"]):
+        severity = 2 if "heavy" in conditions or "thunder" in conditions else 1
+        return RoadCondition(
+            condition="wet",
+            severity=severity,
+            label="WET",
+            icon="💧",
+            color="#3b82f6",
+            description=f"Wet roads - {conditions}",
+            recommendation="🌧️ Headlights on, increase following distance to 4 seconds"
+        )
+    
+    # Dry/good conditions
+    return RoadCondition(
+        condition="dry",
+        severity=0,
+        label="DRY",
+        icon="✓",
+        color="#22c55e",
+        description=f"Good conditions - {temp}°F, {conditions or 'Clear'}",
+        recommendation="✅ Normal driving conditions"
+    )
+
+async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, waypoints_weather: List[WaypointWeather]) -> List[TurnByTurnStep]:
+    """Get turn-by-turn directions with road conditions from Mapbox."""
+    steps = []
+    
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            coords_str = f"{origin_coords[1]},{origin_coords[0]};{dest_coords[1]},{dest_coords[0]}"
+            url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
+            params = {
+                'access_token': MAPBOX_ACCESS_TOKEN,
+                'steps': 'true',
+                'geometries': 'polyline',
+                'overview': 'full',
+                'annotations': 'distance,duration'
+            }
+            
+            response = await client.get(url, params=params)
+            if response.status_code != 200:
+                return steps
+                
+            data = response.json()
+            if not data.get('routes'):
+                return steps
+            
+            route = data['routes'][0]
+            legs = route.get('legs', [])
+            
+            cumulative_distance = 0
+            
+            for leg in legs:
+                for step in leg.get('steps', []):
+                    distance_mi = step.get('distance', 0) / 1609.34  # meters to miles
+                    duration_min = step.get('duration', 0) / 60  # seconds to minutes
+                    cumulative_distance += distance_mi
+                    
+                    maneuver = step.get('maneuver', {})
+                    instruction = maneuver.get('instruction', 'Continue')
+                    maneuver_type = maneuver.get('type', 'straight')
+                    
+                    # Get road name
+                    road_name = step.get('name', 'Unnamed road')
+                    if not road_name:
+                        road_name = step.get('ref', 'Local road')
+                    
+                    # Find nearest waypoint for weather/road condition
+                    road_condition = None
+                    weather_desc = None
+                    temperature = None
+                    has_alert = False
+                    
+                    for wp in waypoints_weather:
+                        if wp.waypoint.distance_from_start and abs(wp.waypoint.distance_from_start - cumulative_distance) < 30:
+                            if wp.weather:
+                                road_condition = derive_road_condition(wp.weather, wp.alerts)
+                                weather_desc = wp.weather.conditions
+                                temperature = wp.weather.temperature
+                            has_alert = len(wp.alerts) > 0
+                            break
+                    
+                    # Only add significant steps (> 0.1 miles or has maneuver)
+                    if distance_mi > 0.1 or maneuver_type not in ['straight', 'new name']:
+                        steps.append(TurnByTurnStep(
+                            instruction=instruction,
+                            distance_miles=round(distance_mi, 1),
+                            duration_minutes=round(duration_min),
+                            road_name=road_name,
+                            maneuver=maneuver_type,
+                            road_condition=road_condition,
+                            weather_at_step=weather_desc,
+                            temperature=temperature,
+                            has_alert=has_alert
+                        ))
+    
+    except Exception as e:
+        logger.error(f"Turn-by-turn directions error: {e}")
+    
+    return steps[:50]  # Limit to 50 steps
+
+def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
+    """Analyze all road conditions along route and determine if reroute is needed."""
+    all_conditions = []
+    worst_severity = 0
+    worst_condition = "dry"
+    reroute_needed = False
+    reroute_reason = None
+    
+    for wp in waypoints_weather:
+        road_cond = derive_road_condition(wp.weather, wp.alerts)
+        all_conditions.append(road_cond)
+        
+        if road_cond.severity > worst_severity:
+            worst_severity = road_cond.severity
+            worst_condition = road_cond.condition
+        
+        # Check if reroute should be recommended
+        if road_cond.severity >= 3:
+            reroute_needed = True
+            if not reroute_reason:
+                location = wp.waypoint.name or f"Mile {int(wp.waypoint.distance_from_start or 0)}"
+                reroute_reason = f"{road_cond.label} conditions at {location} - {road_cond.description}"
+    
+    # Generate summary
+    condition_counts = {}
+    for c in all_conditions:
+        if c.condition != "dry":
+            condition_counts[c.label] = condition_counts.get(c.label, 0) + 1
+    
+    if not condition_counts:
+        summary = "✅ Good road conditions expected throughout your route"
+    else:
+        summary_parts = [f"{count} segments with {label}" for label, count in condition_counts.items()]
+        summary = f"⚠️ Road hazards detected: {', '.join(summary_parts)}"
+    
+    return summary, worst_condition, reroute_needed, reroute_reason
+
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> str:
     """Generate AI-powered weather summary using Gemini Flash."""
     try:
