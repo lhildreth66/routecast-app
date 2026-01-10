@@ -225,13 +225,22 @@ export default function HomeScreen() {
   // Voice-to-text function
   const startVoiceRecognition = () => {
     if (Platform.OS !== 'web') {
-      alert('Voice input is available on web browsers');
+      alert('Voice input works in web browsers. On native devices, use the Expo Go app.');
       return;
     }
 
+    // Check if we're in an iframe (which blocks speech recognition)
+    const isInIframe = window !== window.parent;
+    
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
     if (!SpeechRecognition) {
-      alert('Speech recognition not supported in this browser. Try Chrome or Edge.');
+      alert('🎤 Speech recognition not supported.\n\nPlease use Chrome, Edge, or Safari browser.');
+      return;
+    }
+
+    if (isInIframe) {
+      alert('🎤 Voice input is blocked in preview mode.\n\nTo use voice:\n1. Open the app in a new tab (click the external link icon)\n2. Or deploy the app and test there\n\nThe feature will work perfectly in the standalone app!');
       return;
     }
 
@@ -250,14 +259,13 @@ export default function HomeScreen() {
       recognition.onstart = () => {
         console.log('Voice recognition started');
         setIsListening(true);
-        setChatMessage(''); // Clear existing text
+        setChatMessage('');
       };
 
       recognition.onresult = (event: any) => {
         const transcript = Array.from(event.results)
           .map((result: any) => result[0].transcript)
           .join('');
-        console.log('Transcript:', transcript);
         setChatMessage(transcript);
       };
 
@@ -266,24 +274,22 @@ export default function HomeScreen() {
         setIsListening(false);
         
         if (event.error === 'not-allowed') {
-          alert('🎤 Microphone access denied.\n\nPlease click the lock icon in your browser address bar and allow microphone access.');
+          alert('🎤 Microphone access denied.\n\nClick the lock icon in your address bar to allow microphone access.');
         } else if (event.error === 'no-speech') {
-          alert('No speech detected. Please try again and speak clearly.');
+          alert('No speech detected. Please try again.');
         } else {
-          alert(`Voice error: ${event.error}. Please try again.`);
+          alert(`Voice error: ${event.error}`);
         }
       };
 
       recognition.onend = () => {
-        console.log('Voice recognition ended');
         setIsListening(false);
       };
 
       recognition.start();
-      console.log('Recognition.start() called');
     } catch (err) {
       console.error('Failed to start recognition:', err);
-      alert('Failed to start voice recognition. Please try Chrome or Edge browser.');
+      alert('Failed to start voice recognition. Please try a different browser.');
       setIsListening(false);
     }
   };
