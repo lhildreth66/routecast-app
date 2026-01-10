@@ -12,14 +12,17 @@ import {
   Linking,
   Modal,
   TextInput,
+  Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
 import axios from 'axios';
+import { WebView } from 'react-native-webview';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Types
 interface RoadCondition {
