@@ -119,6 +119,9 @@ export default function RouteWeatherScreen() {
       
       if (res.status >= 200 && res.status < 300) {
         console.log(`[RouteWeather] Success! Data received`);
+        console.log(`[RouteWeather] Has waypoints: ${!!res.data.waypoints}, Count: ${res.data.waypoints?.length || 0}`);
+        console.log(`[RouteWeather] Has bridge warnings: ${res.data.has_bridge_warnings}`);
+        console.log(`[RouteWeather] Bridge clearances:`, res.data.bridge_clearances);
         setWeatherData(res.data);
       } else {
         console.error(`[RouteWeather] Unexpected status: ${res.status}`);
