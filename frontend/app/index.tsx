@@ -857,6 +857,85 @@ export default function HomeScreen() {
           </View>
         </Modal>
       )}
+
+      {/* AI Chat Modal */}
+      {showChat && (
+        <Modal transparent animationType="slide">
+          <View style={styles.chatModalOverlay}>
+            <View style={styles.chatModalContent}>
+              <View style={styles.chatHeader}>
+                <View style={styles.chatHeaderLeft}>
+                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
+                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowChat(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
+                {chatHistory.length === 0 && (
+                  <View style={styles.chatWelcome}>
+                    <Text style={styles.chatWelcomeText}>👋 Hi! I'm your driving assistant.</Text>
+                    <Text style={styles.chatWelcomeSubtext}>Ask me about weather, road conditions, or safe driving tips!</Text>
+                  </View>
+                )}
+                
+                {chatHistory.map((msg, idx) => (
+                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
+                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                  </View>
+                ))}
+                
+                {chatLoading && (
+                  <View style={styles.chatTyping}>
+                    <ActivityIndicator size="small" color="#eab308" />
+                    <Text style={styles.chatTypingText}>Thinking...</Text>
+                  </View>
+                )}
+              </ScrollView>
+              
+              {/* Quick suggestions */}
+              <View style={styles.chatSuggestions}>
+                {chatSuggestions.map((suggestion, idx) => (
+                  <TouchableOpacity 
+                    key={idx} 
+                    style={styles.chatSuggestionBtn}
+                    onPress={() => sendChatMessage(suggestion)}
+                  >
+                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              {/* Input */}
+              <View style={styles.chatInputRow}>
+                <TextInput
+                  style={styles.chatInput}
+                  placeholder="Ask about weather, roads, safety..."
+                  placeholderTextColor="#6b7280"
+                  value={chatMessage}
+                  onChangeText={setChatMessage}
+                  onSubmitEditing={() => sendChatMessage()}
+                  returnKeyType="send"
+                />
+                <TouchableOpacity 
+                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
+                  onPress={() => sendChatMessage()}
+                  disabled={!chatMessage.trim() || chatLoading}
+                >
+                  <Ionicons name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Floating Chat Button */}
+      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
+        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 }
