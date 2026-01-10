@@ -578,9 +578,12 @@ export default function IndexScreen() {
             <DateTimePicker
               value={departure ?? new Date()}
               mode="datetime"
-              onChange={(_, d) => {
+              display="default"
+              onChange={(event, selectedDate) => {
                 setShowPicker(false);
-                if (d) setDeparture(d);
+                if (selectedDate) {
+                  setDeparture(selectedDate);
+                }
               }}
             />
           )}
