@@ -212,6 +212,8 @@ export default function HomeScreen() {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
+        vehicle_type: vehicleType,
+        trucker_mode: truckerMode,
       };
       
       if (useCustomTime) {
