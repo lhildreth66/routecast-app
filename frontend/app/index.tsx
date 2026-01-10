@@ -405,14 +405,37 @@ export default function HomeScreen() {
                     placeholder="Enter destination"
                     placeholderTextColor="#6b7280"
                     value={destination}
-                    onChangeText={setDestination}
+                    onChangeText={handleDestinationChange}
+                    onFocus={() => destination.length >= 2 && setShowDestSuggestions(destSuggestions.length > 0)}
+                    onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
                     returnKeyType="done"
                     onSubmitEditing={handleGetWeather}
                   />
+                  {autocompleteLoading && destination.length >= 2 && (
+                    <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
                   <TouchableOpacity onPress={swapLocations} style={styles.swapButton}>
                     <Ionicons name="swap-vertical" size={20} color="#60a5fa" />
                   </TouchableOpacity>
                 </View>
+                {/* Destination Suggestions Dropdown */}
+                {showDestSuggestions && destSuggestions.length > 0 && (
+                  <View style={styles.suggestionsDropdown}>
+                    {destSuggestions.map((suggestion, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => selectDestSuggestion(suggestion)}
+                      >
+                        <Ionicons name="location-outline" size={16} color="#a1a1aa" />
+                        <View style={styles.suggestionTextContainer}>
+                          <Text style={styles.suggestionShortName}>{suggestion.short_name}</Text>
+                          <Text style={styles.suggestionFullName} numberOfLines={1}>{suggestion.place_name}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Departure Time */}
