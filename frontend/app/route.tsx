@@ -77,6 +77,12 @@ export default function RouteWeatherScreen() {
       process.env.EXPO_PUBLIC_API_URL ||
       process.env.EXPO_PUBLIC_BACKEND_URL ||
       "https://routecast-app.onrender.com/api"; // Use Render backend for web
+
+    console.log('[DEBUG] EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
+    console.log('[DEBUG] EXPO_PUBLIC_BACKEND_URL:', process.env.EXPO_PUBLIC_BACKEND_URL);
+    console.log('[DEBUG] Using env:', env);
+    console.log('[DEBUG] API_ROOT:', normalizeApiRoot(env));
+
     return normalizeApiRoot(env);
   }, []);
 
