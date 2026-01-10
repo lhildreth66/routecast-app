@@ -54,6 +54,17 @@ logger = logging.getLogger(__name__)
 
 # ==================== Models ====================
 
+# Vehicle types for safety scoring
+VEHICLE_TYPES = {
+    "car": {"wind_sensitivity": 1.0, "ice_sensitivity": 1.0, "visibility_sensitivity": 1.0, "name": "Car/Sedan"},
+    "suv": {"wind_sensitivity": 1.1, "ice_sensitivity": 0.9, "visibility_sensitivity": 1.0, "name": "SUV"},
+    "truck": {"wind_sensitivity": 1.3, "ice_sensitivity": 0.85, "visibility_sensitivity": 1.0, "name": "Pickup Truck"},
+    "semi": {"wind_sensitivity": 1.8, "ice_sensitivity": 1.2, "visibility_sensitivity": 1.3, "name": "Semi Truck"},
+    "rv": {"wind_sensitivity": 1.7, "ice_sensitivity": 1.1, "visibility_sensitivity": 1.2, "name": "RV/Motorhome"},
+    "motorcycle": {"wind_sensitivity": 2.0, "ice_sensitivity": 2.5, "visibility_sensitivity": 1.5, "name": "Motorcycle"},
+    "trailer": {"wind_sensitivity": 1.6, "ice_sensitivity": 1.3, "visibility_sensitivity": 1.1, "name": "Vehicle + Trailer"},
+}
+
 class StopPoint(BaseModel):
     location: str
     type: str = "stop"  # stop, gas, food, rest
@@ -63,6 +74,44 @@ class RouteRequest(BaseModel):
     destination: str
     departure_time: Optional[str] = None  # ISO format datetime
     stops: Optional[List[StopPoint]] = []
+    vehicle_type: Optional[str] = "car"  # car, suv, truck, semi, rv, motorcycle, trailer
+    trucker_mode: Optional[bool] = False  # Enable trucker-specific warnings
+    vehicle_height_ft: Optional[float] = None  # Vehicle height in feet for clearance warnings
+
+class HazardAlert(BaseModel):
+    type: str  # wind, ice, visibility, rain, snow, etc.
+    severity: str  # low, medium, high, extreme
+    distance_miles: float
+    eta_minutes: int
+    message: str
+    recommendation: str
+    countdown_text: str  # "Heavy rain in 27 minutes"
+
+class RestStop(BaseModel):
+    name: str
+    type: str  # gas, food, rest_area
+    lat: float
+    lon: float
+    distance_miles: float
+    eta_minutes: int
+    weather_at_arrival: Optional[str] = None
+    temperature_at_arrival: Optional[int] = None
+    recommendation: str  # "Good time to stop - rain clears"
+
+class DepartureWindow(BaseModel):
+    departure_time: str
+    arrival_time: str
+    safety_score: int
+    hazard_count: int
+    recommendation: str
+    conditions_summary: str
+
+class SafetyScore(BaseModel):
+    overall_score: int  # 0-100
+    risk_level: str  # low, moderate, high, extreme
+    vehicle_type: str
+    factors: List[str]  # List of contributing factors
+    recommendations: List[str]
 
 class Waypoint(BaseModel):
     lat: float
