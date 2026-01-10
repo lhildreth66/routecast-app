@@ -1671,18 +1671,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#3f3f46',
   },
 });
-    borderRadius: 12,
-    gap: 10,
-  },
-  listeningPulse: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ef4444',
-  },
-  listeningText: {
-    color: '#fecaca',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
