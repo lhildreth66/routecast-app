@@ -128,13 +128,19 @@ export default function RouteWeatherScreen() {
         setErrorMsg(`Received unexpected status: ${res.status}`);
       }
     } catch (err: any) {
+      console.error(`[RouteWeather] Full error:`, err);
+      console.error(`[RouteWeather] Error message:`, err?.message);
+      console.error(`[RouteWeather] Response:`, err?.response);
+      console.error(`[RouteWeather] Response data:`, err?.response?.data);
+      console.error(`[RouteWeather] Response status:`, err?.response?.status);
+
       const status = err?.response?.status;
       const detail =
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
         err?.message ||
         "Request failed";
-      
+
       console.error(`[RouteWeather] Error:`, {
         status,
         detail,
