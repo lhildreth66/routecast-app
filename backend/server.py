@@ -155,6 +155,14 @@ class SafetyScore(BaseModel):
     factors: List[str]  # List of contributing factors
     recommendations: List[str]
 
+class ChatMessage(BaseModel):
+    message: str
+    route_context: Optional[str] = None  # Optional route info for context
+
+class ChatResponse(BaseModel):
+    response: str
+    suggestions: List[str] = []
+
 class Waypoint(BaseModel):
     lat: float
     lon: float
