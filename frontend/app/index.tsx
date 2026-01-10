@@ -61,6 +61,11 @@ export default function HomeScreen() {
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
   const [autocompleteLoading, setAutocompleteLoading] = useState(false);
   
+  // Vehicle & Trucker mode
+  const [vehicleType, setVehicleType] = useState('car');
+  const [truckerMode, setTruckerMode] = useState(false);
+  const [showVehicleSelector, setShowVehicleSelector] = useState(false);
+  
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
