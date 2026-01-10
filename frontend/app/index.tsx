@@ -88,12 +88,22 @@ export default function HomeScreen() {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSuggestions, setChatSuggestions] = useState<string[]>(['How to drive in snow?', 'Is fog dangerous?', 'Rest stop tips']);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   
   // Multi-stop
   const [stops, setStops] = useState<StopPoint[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
   const [newStopLocation, setNewStopLocation] = useState('');
   const [newStopType, setNewStopType] = useState('stop');
+
+  // Check for speech recognition support on web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setSpeechSupported(!!SpeechRecognition);
+    }
+  }, []);
 
   useEffect(() => {
     fetchRecentRoutes();
