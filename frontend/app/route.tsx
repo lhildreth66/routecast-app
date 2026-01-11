@@ -271,22 +271,19 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         </div>
       </div>
       <script>
-        // Strict continental US bounds only - no Mexico, Canada, or Caribbean
-        var southWest = L.latLng(26, -123);
-        var northEast = L.latLng(48, -70);
+        // Strict continental US bounds only - no Mexico, Canada
+        var southWest = L.latLng(28, -120);
+        var northEast = L.latLng(47, -72);
         var usBounds = L.latLngBounds(southWest, northEast);
         
         var map = L.map('map', { 
           zoomControl: false,
           attributionControl: false,
-          maxBounds: usBounds.pad(0.02),
+          maxBounds: usBounds,
           maxBoundsViscosity: 1.0,
           minZoom: 5,
           maxZoom: 10
-        }).setView([${usLat}, ${usLon}], 5);
-        
-        // Fit to US bounds initially, but padded to show only US
-        map.setMaxBounds(usBounds.pad(0.02));
+        }).setView([${usLat}, ${usLon}], 6);
         
         // Dark base map
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
