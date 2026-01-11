@@ -1168,6 +1168,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    color: '#6b7280',
+    fontSize: 12,
     marginBottom: 12,
   },
   conditionsTab: {},
