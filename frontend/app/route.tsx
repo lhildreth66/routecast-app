@@ -701,13 +701,6 @@ export default function RouteScreen() {
           <Ionicons name="time-outline" size={16} color="#60a5fa" />
           <Text style={styles.statValue}>{routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : '--'}</Text>
         </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Ionicons name="shield-checkmark-outline" size={16} color={routeData.safety_score ? getSafetyColor(routeData.safety_score.overall_score) : '#6b7280'} />
-          <Text style={[styles.statValue, { color: routeData.safety_score ? getSafetyColor(routeData.safety_score.overall_score) : '#6b7280' }]}>
-            {routeData.safety_score ? `${routeData.safety_score.overall_score}/100` : '--'}
-          </Text>
-        </View>
       </View>
 
       {/* Radar Map Modal */}
