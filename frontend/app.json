@@ -2,13 +2,17 @@
   "expo": {
     "name": "Routecast",
     "slug": "routecast",
-    "version": "1.0.0",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "routecast",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
+
+    "owner": "promedtrans01",
+
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
+
+    "newArchEnabled": false,
 
     "ios": {
       "supportsTablet": true,
@@ -17,26 +21,19 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Routecast needs your location to show weather along your route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Routecast needs your location to provide weather updates during your trip.",
-        "UIBackgroundModes": [
-          "location",
-          "fetch",
-          "remote-notification"
-        ]
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
       }
     },
 
     "android": {
       "package": "com.routecast.app",
-      "versionCode": 3,
-      "usesCleartextTraffic": true,
+      "versionCode": 10,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "INTERNET",
-        "ACCESS_NETWORK_STATE",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
@@ -59,7 +56,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#0a0a0a"
@@ -89,17 +86,12 @@
       "typedRoutes": true
     },
 
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-
     "extra": {
-      "router": {},
       "eas": {
         "projectId": "828ca4f8-73f9-4205-9aba-d6bf63e3c70e"
-      }
-    },
-
-    "owner": "promedtrans01"
+      },
+      "router": {}
+    }
   }
 }
+
