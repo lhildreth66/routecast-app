@@ -1,14 +1,12 @@
 {
   "expo": {
-    "name": "Routecast",
-    "slug": "routecast",
+    "name": "Routecast2",
+    "slug": "routecast2",
     "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "routecast",
+    "scheme": "routecast2",
     "userInterfaceStyle": "dark",
-
-    "owner": "promedtrans01",
 
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
 
@@ -94,4 +92,5 @@
     }
   }
 }
+
 
